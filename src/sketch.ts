@@ -1,32 +1,58 @@
 import p5 from 'p5';
-import { generateLines, drawLine, generateBackgroundColor } from './generators';
+import { generateLines, drawLine, drawLineToBuffer, LineConfig } from './generators';
+import { fillRegions, ShadingConfig } from './regionFiller';
+
+// Landscape aspect ratio for the artwork
+const WIDTH = 1920;
+const HEIGHT = 1080;
+
+// SDF shading configuration - tweak these for different effects
+const SHADING_CONFIG: ShadingConfig = {
+    edgeIntensity: 0.5,    // How strong the edge effect is (0-1)
+    edgeFalloff: 100,      // Distance in pixels over which the effect fades
+    edgeMode: 'darken',    // 'darken' | 'lighten' | 'saturate'
+};
 
 const sketch = (p: p5) => {
+    let lineBuffer: p5.Graphics;
+    let isGenerating = false;
+
     function generateArt() {
-        // Random background color
-        const bgColor = generateBackgroundColor(p);
-        p.background(bgColor);
-        
-        // Generate and draw edge-to-edge lines
-        const numLines = Math.floor(p.random(15, 30));
-        const lines = generateLines(p, numLines);
-        
+        if (isGenerating) return;
+        isGenerating = true;
+
+        // Clear line buffer with white background
+        lineBuffer.background(255);
+
+        // Generate lines
+        const numLines = Math.floor(p.random(15, 40));
+        const lines: LineConfig[] = generateLines(p, numLines);
+
+        // Draw lines to buffer (black lines for detection)
+        for (const line of lines) {
+            drawLineToBuffer(lineBuffer, line);
+        }
+
+        // Fill regions based on line buffer with SDF shading
+        p.background(255);
+        fillRegions(p, lineBuffer, SHADING_CONFIG);
+
+        // Draw colored lines on top
         for (const line of lines) {
             drawLine(p, line);
         }
-        
-        // Draw instructions
-        p.noStroke();
-        p.fill(255, 255, 255, 200);
-        p.rect(0, 0, p.width, 40);
-        p.fill(0);
-        p.textSize(16);
-        p.textAlign(p.CENTER, p.CENTER);
-        p.text('Click anywhere to generate new artwork', p.width / 2, 20);
+
+        isGenerating = false;
     }
 
     p.setup = () => {
-        p.createCanvas(800, 600);
+        p.createCanvas(WIDTH, HEIGHT);
+        p.pixelDensity(1);
+        
+        // Create off-screen buffer for line detection
+        lineBuffer = p.createGraphics(WIDTH, HEIGHT);
+        lineBuffer.pixelDensity(1);
+        
         generateArt();
     };
 
@@ -40,4 +66,3 @@ const sketch = (p: p5) => {
 };
 
 new p5(sketch);
-

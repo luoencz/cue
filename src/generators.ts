@@ -2,12 +2,12 @@ import p5 from 'p5';
 
 type Edge = 'top' | 'bottom' | 'left' | 'right';
 
-interface Point {
+export interface Point {
     x: number;
     y: number;
 }
 
-interface LineConfig {
+export interface LineConfig {
     start: Point;
     end: Point;
     color: p5.Color;
@@ -54,7 +54,7 @@ export function generateEdgeToEdgeLine(p: p5): LineConfig {
         start: getPointOnEdge(p, startEdge),
         end: getPointOnEdge(p, endEdge),
         color: p.color(p.random(255), p.random(255), p.random(255)),
-        weight: p.random(1, 4)
+        weight: p.random(1, 5)
     };
 }
 
@@ -70,12 +70,21 @@ export function generateLines(p: p5, count: number): LineConfig[] {
 }
 
 /**
- * Draw a line on the canvas
+ * Draw a line on the canvas or graphics buffer
  */
-export function drawLine(p: p5, line: LineConfig): void {
-    p.stroke(line.color);
-    p.strokeWeight(line.weight);
-    p.line(line.start.x, line.start.y, line.end.x, line.end.y);
+export function drawLine(target: p5 | p5.Graphics, line: LineConfig): void {
+    target.stroke(line.color);
+    target.strokeWeight(line.weight);
+    target.line(line.start.x, line.start.y, line.end.x, line.end.y);
+}
+
+/**
+ * Draw a line to a buffer using black color (for flood fill detection)
+ */
+export function drawLineToBuffer(buffer: p5.Graphics, line: LineConfig): void {
+    buffer.stroke(0);
+    buffer.strokeWeight(line.weight);
+    buffer.line(line.start.x, line.start.y, line.end.x, line.end.y);
 }
 
 /**
