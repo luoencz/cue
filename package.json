@@ -1,0 +1,19 @@
+{
+  "name": "cue",
+  "version": "1.0.0",
+  "description": "Generative art with p5.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@types/p5": "^1.7.6",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.10"
+  },
+  "dependencies": {
+    "p5": "^1.9.0"
+  }
+}
+
