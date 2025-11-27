@@ -1,4 +1,5 @@
 import p5 from 'p5';
+import { HSB, generateDistinctColor, hsbObjToRgb } from './color';
 
 type Edge = 'top' | 'bottom' | 'left' | 'right';
 
@@ -10,23 +11,23 @@ export interface Point {
 export interface LineConfig {
     start: Point;
     end: Point;
-    color: p5.Color;
+    color: HSB;
     weight: number;
 }
 
 /**
- * Get a random point on a specified edge of the canvas
+ * Get a random point on a specified edge
  */
-function getPointOnEdge(p: p5, edge: Edge): Point {
+function getPointOnEdge(p: p5, edge: Edge, width: number, height: number): Point {
     switch (edge) {
         case 'top':
-            return { x: p.random(p.width), y: 0 };
+            return { x: p.random(width), y: 0 };
         case 'bottom':
-            return { x: p.random(p.width), y: p.height };
+            return { x: p.random(width), y: height };
         case 'left':
-            return { x: 0, y: p.random(p.height) };
+            return { x: 0, y: p.random(height) };
         case 'right':
-            return { x: p.width, y: p.random(p.height) };
+            return { x: width, y: p.random(height) };
     }
 }
 
@@ -41,56 +42,49 @@ function getRandomEdge(p: p5): Edge {
 /**
  * Generate a line that stretches from one edge to another
  */
-export function generateEdgeToEdgeLine(p: p5): LineConfig {
+export function generateEdgeToEdgeLine(p: p5, index: number, width: number, height: number): LineConfig {
     const startEdge = getRandomEdge(p);
     let endEdge = getRandomEdge(p);
-    
+
     // Ensure we pick a different edge for more interesting lines
     while (endEdge === startEdge) {
         endEdge = getRandomEdge(p);
     }
-    
+
     return {
-        start: getPointOnEdge(p, startEdge),
-        end: getPointOnEdge(p, endEdge),
-        color: p.color(p.random(255), p.random(255), p.random(255)),
-        weight: p.random(1, 5)
+        start: getPointOnEdge(p, startEdge, width, height),
+        end: getPointOnEdge(p, endEdge, width, height),
+        color: generateDistinctColor(index, 0.7 + p.random(0.2), 0.6 + p.random(0.3)),
+        weight: p.random(2, 5),
     };
 }
 
 /**
  * Generate multiple edge-to-edge lines
  */
-export function generateLines(p: p5, count: number): LineConfig[] {
+export function generateLines(p: p5, count: number, width: number, height: number): LineConfig[] {
     const lines: LineConfig[] = [];
     for (let i = 0; i < count; i++) {
-        lines.push(generateEdgeToEdgeLine(p));
+        lines.push(generateEdgeToEdgeLine(p, i, width, height));
     }
     return lines;
 }
 
 /**
- * Draw a line on the canvas or graphics buffer
+ * Draw a line on the canvas or graphics buffer with its color
  */
 export function drawLine(target: p5 | p5.Graphics, line: LineConfig): void {
-    target.stroke(line.color);
+    const rgb = hsbObjToRgb(line.color);
+    target.stroke(rgb.r, rgb.g, rgb.b);
     target.strokeWeight(line.weight);
     target.line(line.start.x, line.start.y, line.end.x, line.end.y);
 }
 
 /**
- * Draw a line to a buffer using black color (for flood fill detection)
+ * Draw a line to a buffer using black color (for boundary detection)
  */
 export function drawLineToBuffer(buffer: p5.Graphics, line: LineConfig): void {
     buffer.stroke(0);
     buffer.strokeWeight(line.weight);
     buffer.line(line.start.x, line.start.y, line.end.x, line.end.y);
 }
-
-/**
- * Generate a random background color
- */
-export function generateBackgroundColor(p: p5): p5.Color {
-    return p.color(p.random(255), p.random(255), p.random(255));
-}
-
