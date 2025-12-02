@@ -1,7 +1,6 @@
 import p5 from 'p5';
-import { DistanceField, getMaxDistance } from './sdf';
 import { HSB, hsbObjToRgb } from './color';
-import { LEADING, WATERCOLOR } from './config';
+import { LEADING, WATERCOLOR, STAINED_GLASS } from './config';
 import { LineConfig, CircleConfig } from './generators';
 
 // Import shaders as raw strings (Vite handles this with ?raw)
@@ -18,16 +17,22 @@ const MAX_CIRCLES = 10;
 export interface StainedGlassConfig {
     centerGlow: number;
     edgeDarken: number;
-    glowFalloff: number;
     noiseScale: number;
     noiseIntensity: number;
     noiseSeed: number;
 }
 
-interface RegionData {
+/**
+ * Tile rendering configuration for high-res export
+ */
+export interface TileConfig {
+    tileOffset: { x: number; y: number };
+    fullResolution: { width: number; height: number };
+}
+
+export interface RegionData {
     ids: Uint8Array;
     colors: HSB[];
-    distanceField: DistanceField;
 }
 
 /**
@@ -78,55 +83,86 @@ function packCirclesForShader(circles: CircleConfig[]): number[] {
 export class ShaderRenderer {
     private shader: p5.Shader | null = null;
     private regionTex: p5.Graphics | null = null;
-    private distanceTex: p5.Graphics | null = null;
     private colorsTex: p5.Graphics | null = null;
+    
+    /** The WebGL renderer to draw to */
+    private renderer: p5 | p5.Graphics;
+    /** The p5 instance for creating 2D graphics (textures) */
+    private p5Instance: p5;
 
-    constructor(private p: p5) {}
+    /**
+     * @param renderer - The WebGL renderer to draw to (can be p5 or p5.Graphics)
+     * @param p5Instance - Optional separate p5 instance for creating 2D textures.
+     *                     Required when renderer is a p5.Graphics object.
+     */
+    constructor(renderer: p5 | p5.Graphics, p5Instance?: p5) {
+        this.renderer = renderer;
+        this.p5Instance = p5Instance || (renderer as p5);
+    }
 
     /**
      * Initialize shader - call once in setup()
      */
     init(): void {
-        this.shader = this.p.createShader(vertShader, fragShader);
+        this.shader = this.renderer.createShader(vertShader, fragShader);
     }
 
     /**
-     * Render regions with stained glass effect and rounded leading
+     * Render regions with stained glass effect and rounded leading.
+     * Uses analytical SDF for distance calculations (no distance texture needed).
+     * 
+     * @param previewScale - Scale factor for preview rendering (1.0 = full export resolution).
+     *                       Effect parameters are multiplied by this to show accurate preview.
+     * @param tileConfig - Optional tile configuration for high-res tiled rendering
      */
     render(
         data: RegionData,
         config: StainedGlassConfig,
         lines: LineConfig[],
-        circles: CircleConfig[] = []
+        circles: CircleConfig[] = [],
+        previewScale: number = 1.0,
+        tileConfig?: TileConfig
     ): void {
         if (!this.shader) {
             throw new Error('ShaderRenderer not initialized. Call init() first.');
         }
 
-        const { width, height } = this.p;
+        const { width, height } = this.renderer;
+        
+        // Determine full resolution for tile offset
+        const fullWidth = tileConfig?.fullResolution.width ?? width;
+        const fullHeight = tileConfig?.fullResolution.height ?? height;
 
         // Create/update textures
         this.updateRegionTexture(data.ids, width, height);
-        this.updateDistanceTexture(data.distanceField);
         this.updateColorsTexture(data.colors);
 
         // Apply shader
-        this.p.shader(this.shader);
+        this.renderer.shader(this.shader);
 
         // Set texture uniforms
         this.shader.setUniform('uRegionTex', this.regionTex!);
-        this.shader.setUniform('uDistanceTex', this.distanceTex!);
         this.shader.setUniform('uColorsTex', this.colorsTex!);
 
         // Resolution for pixel-space calculations
         this.shader.setUniform('uResolution', [width, height]);
+        
+        // Tile configuration for consistent rendering across tiles
+        if (tileConfig) {
+            this.shader.setUniform('uFullResolution', [fullWidth, fullHeight]);
+            this.shader.setUniform('uTileOffset', [tileConfig.tileOffset.x, tileConfig.tileOffset.y]);
+        } else {
+            // Non-tiled rendering: full resolution equals tile resolution, no offset
+            this.shader.setUniform('uFullResolution', [width, height]);
+            this.shader.setUniform('uTileOffset', [0, 0]);
+        }
 
-        // Stained glass uniforms
+        // Stained glass uniforms (scaled for preview)
         this.shader.setUniform('uCenterGlow', config.centerGlow);
         this.shader.setUniform('uEdgeDarken', config.edgeDarken);
-        this.shader.setUniform('uGlowFalloff', config.glowFalloff);
+        this.shader.setUniform('uGlowFalloff', STAINED_GLASS.glowFalloff * previewScale);
 
-        // Noise uniforms
+        // Noise uniforms (scale inversely for consistent visual density)
         this.shader.setUniform('uNoiseScale', config.noiseScale);
         this.shader.setUniform('uNoiseIntensity', config.noiseIntensity);
         this.shader.setUniform('uNoiseSeed', config.noiseSeed);
@@ -141,25 +177,25 @@ export class ShaderRenderer {
         this.shader.setUniform('uCircles', circleData);
         this.shader.setUniform('uCircleCount', Math.min(circles.length, MAX_CIRCLES));
 
-        // Leading appearance
-        this.shader.setUniform('uLeadingThickness', LEADING.thickness);
-        this.shader.setUniform('uRoundingRadius', LEADING.roundingRadius);
+        // Leading appearance (scaled for preview to match final appearance)
+        this.shader.setUniform('uLeadingThickness', LEADING.thickness * previewScale);
+        this.shader.setUniform('uRoundingRadius', LEADING.roundingRadius * previewScale);
         this.shader.setUniform('uLeadingColor', [LEADING.color.r, LEADING.color.g, LEADING.color.b]);
 
-        // Watercolor effect uniforms
+        // Watercolor effect uniforms (scaled for preview)
         this.shader.setUniform('uGrainIntensity', WATERCOLOR.grainIntensity);
-        this.shader.setUniform('uWobbleAmount', WATERCOLOR.wobbleAmount);
-        this.shader.setUniform('uWobbleScale', WATERCOLOR.wobbleScale);
+        this.shader.setUniform('uWobbleAmount', WATERCOLOR.wobbleAmount * previewScale);
+        this.shader.setUniform('uWobbleScale', WATERCOLOR.wobbleScale / previewScale);  // Inverse scale for pattern size
         this.shader.setUniform('uColorBleed', WATERCOLOR.colorBleed);
         this.shader.setUniform('uSaturationBleed', WATERCOLOR.saturationBleed);
-        this.shader.setUniform('uBleedScale', WATERCOLOR.bleedScale);
+        this.shader.setUniform('uBleedScale', WATERCOLOR.bleedScale / previewScale);  // Inverse scale for pattern size
         this.shader.setUniform('uEdgeIrregularity', WATERCOLOR.edgeIrregularity);
 
         // Draw full-screen quad to trigger fragment shader
-        this.p.rect(0, 0, width, height);
+        this.renderer.rect(0, 0, width, height);
 
         // Reset to default shader
-        this.p.resetShader();
+        this.renderer.resetShader();
     }
 
     /**
@@ -167,7 +203,8 @@ export class ShaderRenderer {
      */
     private updateRegionTexture(ids: Uint8Array, width: number, height: number): void {
         if (!this.regionTex || this.regionTex.width !== width || this.regionTex.height !== height) {
-            this.regionTex = this.p.createGraphics(width, height);
+            this.regionTex?.remove();
+            this.regionTex = this.p5Instance.createGraphics(width, height);
             this.regionTex.pixelDensity(1);
         }
 
@@ -187,40 +224,11 @@ export class ShaderRenderer {
     }
 
     /**
-     * Create texture with normalized distance values
-     */
-    private updateDistanceTexture(field: DistanceField): void {
-        const { width, height, data } = field;
-
-        if (!this.distanceTex || this.distanceTex.width !== width || this.distanceTex.height !== height) {
-            this.distanceTex = this.p.createGraphics(width, height);
-            this.distanceTex.pixelDensity(1);
-        }
-
-        const maxDist = getMaxDistance(field);
-
-        this.distanceTex.loadPixels();
-        const pixels = this.distanceTex.pixels;
-
-        for (let i = 0; i < data.length; i++) {
-            const idx = i * 4;
-            const normalizedDist = maxDist > 0 ? Math.sqrt(data[i]) / maxDist : 0;
-            const distByte = Math.min(255, Math.floor(normalizedDist * 255));
-            pixels[idx] = distByte;
-            pixels[idx + 1] = 0;
-            pixels[idx + 2] = 0;
-            pixels[idx + 3] = 255;
-        }
-
-        this.distanceTex.updatePixels();
-    }
-
-    /**
      * Create 256x1 texture with region colors
      */
     private updateColorsTexture(colors: HSB[]): void {
         if (!this.colorsTex) {
-            this.colorsTex = this.p.createGraphics(256, 1);
+            this.colorsTex = this.p5Instance.createGraphics(256, 1);
             this.colorsTex.pixelDensity(1);
         }
 
@@ -250,7 +258,6 @@ export class ShaderRenderer {
      */
     dispose(): void {
         this.regionTex?.remove();
-        this.distanceTex?.remove();
         this.colorsTex?.remove();
     }
 }

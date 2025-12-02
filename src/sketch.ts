@@ -6,78 +6,396 @@ import {
     generateCircles,
     drawCircleToBuffer,
     CircleConfig,
+    getResolutionScale,
 } from './generators';
-import { detectRegions } from './regionFiller';
-import { ShaderRenderer, StainedGlassConfig } from './shaderRenderer';
-import { CANVAS, LINES, CIRCLES, STAINED_GLASS } from './config';
+import { detectRegions, RegionData } from './regionFiller';
+import { ShaderRenderer, StainedGlassConfig, TileConfig } from './shaderRenderer';
+import { LINES, CIRCLES, STAINED_GLASS, MAX_TILE_SIZE } from './config';
+import { UI } from './ui';
+import {
+    calculateTileGrid,
+    needsTiledRendering,
+    compositeTiles,
+    extractTileRegionData,
+    scaleShapesForTile,
+    downloadCanvas,
+    TileInfo,
+} from './tiledRenderer';
+
+/** Maximum preview resolution (longest side) - keeps WebGL within safe limits */
+const PREVIEW_MAX_RESOLUTION = 1920;
+
+// Generation state - preserved for regeneration and export
+interface GenerationState {
+    targetWidth: number;
+    targetHeight: number;
+    previewWidth: number;
+    previewHeight: number;
+    displayScale: number;
+    lines: LineConfig[];
+    circles: CircleConfig[];
+    noiseSeed: number;
+}
 
 const sketch = (p: p5) => {
-    let shapeBuffer: p5.Graphics;
     let shaderRenderer: ShaderRenderer;
+    let ui: UI;
     let isGenerating = false;
+    let state: GenerationState = {
+        targetWidth: 1920,
+        targetHeight: 1080,
+        previewWidth: 1920,
+        previewHeight: 1080,
+        displayScale: 1,
+        lines: [],
+        circles: [],
+        noiseSeed: 0,
+    };
 
-    function generateArt() {
-        if (isGenerating) return;
-        isGenerating = true;
+    /**
+     * Calculate preview render resolution (capped for WebGL safety)
+     * and CSS display scale to fit the screen
+     */
+    function calculatePreviewDimensions(targetWidth: number, targetHeight: number): {
+        renderWidth: number;
+        renderHeight: number;
+        displayScale: number;
+    } {
+        // Cap render resolution at PREVIEW_MAX_RESOLUTION on longest side
+        const aspectRatio = targetWidth / targetHeight;
+        let renderWidth: number;
+        let renderHeight: number;
+        
+        if (targetWidth >= targetHeight) {
+            // Landscape or square
+            renderWidth = Math.min(targetWidth, PREVIEW_MAX_RESOLUTION);
+            renderHeight = Math.round(renderWidth / aspectRatio);
+        } else {
+            // Portrait
+            renderHeight = Math.min(targetHeight, PREVIEW_MAX_RESOLUTION);
+            renderWidth = Math.round(renderHeight * aspectRatio);
+        }
+        
+        // Calculate available screen space
+        const availableWidth = window.innerWidth - 80;
+        const availableHeight = window.innerHeight - 160;
+        
+        // Calculate CSS scale to fit rendered canvas to screen
+        const scaleToFitWidth = availableWidth / renderWidth;
+        const scaleToFitHeight = availableHeight / renderHeight;
+        const displayScale = Math.min(scaleToFitWidth, scaleToFitHeight, 1); // Never scale up
+        
+        return { renderWidth, renderHeight, displayScale };
+    }
 
-        // Clear shape buffer with white background
-        shapeBuffer.background(255);
+    /**
+     * Scale shapes from target resolution to preview resolution
+     */
+    function scaleShapesToPreview(
+        lines: LineConfig[],
+        circles: CircleConfig[],
+        targetWidth: number,
+        targetHeight: number,
+        previewWidth: number,
+        previewHeight: number
+    ): { lines: LineConfig[]; circles: CircleConfig[] } {
+        const scaleX = previewWidth / targetWidth;
+        const scaleY = previewHeight / targetHeight;
+        // Use uniform scale (should be the same due to aspect ratio preservation)
+        const scale = scaleX;
+        
+        const scaledLines = lines.map(line => ({
+            ...line,
+            start: { x: line.start.x * scale, y: line.start.y * scale },
+            end: { x: line.end.x * scale, y: line.end.y * scale },
+            weight: line.weight * scale,
+        }));
+        
+        const scaledCircles = circles.map(circle => ({
+            ...circle,
+            center: { x: circle.center.x * scale, y: circle.center.y * scale },
+            radius: circle.radius * scale,
+            weight: circle.weight * scale,
+        }));
+        
+        return { lines: scaledLines, circles: scaledCircles };
+    }
 
-        // Generate lines
-        const numLines = Math.floor(p.random(LINES.min, LINES.max));
-        const lines: LineConfig[] = generateLines(p, numLines, CANVAS.width, CANVAS.height);
+    /**
+     * Apply CSS transform to canvas for display scaling
+     */
+    function applyDisplayScale(displayScale: number): void {
+        const canvas = (p as unknown as { canvas: HTMLCanvasElement }).canvas;
+        canvas.style.transform = `scale(${displayScale})`;
+        canvas.style.transformOrigin = 'center center';
+    }
 
-        // Generate circles
-        const numCircles = Math.floor(p.random(CIRCLES.min, CIRCLES.max));
-        const circles: CircleConfig[] = generateCircles(p, numCircles, CANVAS.width, CANVAS.height);
+    /**
+     * Generate shapes at target resolution.
+     * Shape counts scale with area (more shapes for larger images).
+     * Shape sizes (circle radius) scale with linear dimension.
+     * Effect parameters (line thickness, wobble) remain fixed pixels.
+     */
+    function generateShapes(width: number, height: number): { lines: LineConfig[]; circles: CircleConfig[] } {
+        // Get resolution-based scale factors
+        const { countScale, sizeScale } = getResolutionScale(width, height);
+        
+        // Scale shape counts based on canvas area (sqrt for linear density)
+        const baseLineCount = p.random(LINES.min, LINES.max);
+        const baseCircleCount = p.random(CIRCLES.min, CIRCLES.max);
+        
+        const numLines = Math.floor(baseLineCount * countScale);
+        const numCircles = Math.floor(baseCircleCount * countScale);
+        
+        // Generate shapes with scaled sizes
+        const lines = generateLines(p, numLines, width, height);
+        const circles = generateCircles(p, numCircles, width, height, sizeScale);
+        
+        return { lines, circles };
+    }
 
-        // Draw all shapes to buffer (black strokes for boundary detection)
+    /**
+     * Compute region data from shapes
+     */
+    function computeRegionData(
+        lines: LineConfig[],
+        circles: CircleConfig[],
+        width: number,
+        height: number
+    ): RegionData {
+        const buffer = p.createGraphics(width, height);
+        buffer.pixelDensity(1);
+        buffer.background(255);
+        
         for (const line of lines) {
-            drawLineToBuffer(shapeBuffer, line);
+            drawLineToBuffer(buffer, line);
         }
         for (const circle of circles) {
-            drawCircleToBuffer(shapeBuffer, circle);
+            drawCircleToBuffer(buffer, circle);
         }
+        
+        buffer.loadPixels();
+        const regionData = detectRegions(buffer.pixels as unknown as Uint8ClampedArray, width, height);
+        buffer.remove();
+        
+        return regionData;
+    }
 
-        // Detect regions from shape buffer (CPU)
-        shapeBuffer.loadPixels();
-        // p5's type definitions incorrectly type pixels as number[], but it's actually Uint8ClampedArray
-        const regionData = detectRegions(shapeBuffer.pixels as unknown as Uint8ClampedArray, CANVAS.width, CANVAS.height);
-
-        // Build config with randomized noise seed
+    /**
+     * Render preview at capped resolution
+     */
+    function renderPreview(): void {
+        const { previewWidth, previewHeight, targetWidth, targetHeight, lines, circles, noiseSeed } = state;
+        
+        // Scale shapes from target to preview resolution
+        const { lines: previewLines, circles: previewCircles } = scaleShapesToPreview(
+            lines, circles, targetWidth, targetHeight, previewWidth, previewHeight
+        );
+        
+        // Compute region data at preview resolution
+        const regionData = computeRegionData(previewLines, previewCircles, previewWidth, previewHeight);
+        
+        // Build shader config
         const config: StainedGlassConfig = {
             ...STAINED_GLASS,
-            noiseSeed: p.random(1000),
+            noiseSeed,
         };
-
-        // Render regions with stained glass effect and rounded leading (GPU)
+        
+        // Calculate preview scale (ratio of preview to target resolution)
+        // This scales effect parameters so preview looks like a scaled-down final image
+        const previewScale = previewWidth / targetWidth;
+        
+        // Render with preview scale for accurate visual representation
         p.background(255);
-        shaderRenderer.render(regionData, config, lines, circles);
+        shaderRenderer.render(regionData, config, previewLines, previewCircles, previewScale);
+    }
 
+    /**
+     * Generate new artwork with the given target resolution
+     */
+    function generateArt(targetWidth: number, targetHeight: number): void {
+        if (isGenerating) return;
+        isGenerating = true;
+        
+        // Calculate preview dimensions and display scale
+        const { renderWidth, renderHeight, displayScale } = calculatePreviewDimensions(targetWidth, targetHeight);
+        
+        // Resize canvas to preview resolution
+        if (p.width !== renderWidth || p.height !== renderHeight) {
+            p.resizeCanvas(renderWidth, renderHeight);
+        }
+        
+        // Update state
+        state.targetWidth = targetWidth;
+        state.targetHeight = targetHeight;
+        state.previewWidth = renderWidth;
+        state.previewHeight = renderHeight;
+        state.displayScale = displayScale;
+        
+        // Generate new shapes at target resolution
+        const { lines, circles } = generateShapes(targetWidth, targetHeight);
+        state.lines = lines;
+        state.circles = circles;
+        state.noiseSeed = p.random(1000);
+        
+        // Render preview
+        renderPreview();
+        
+        // Apply CSS scaling for display
+        applyDisplayScale(displayScale);
+        
+        // Show canvas with fade-in
+        const canvas = (p as unknown as { canvas: HTMLCanvasElement }).canvas;
+        canvas.classList.add('visible');
+        
+        // Update resolution display
+        ui.updateResolutionDisplay(targetWidth, targetHeight);
+        
         isGenerating = false;
     }
 
+    /**
+     * Export full resolution image using tiled rendering if needed
+     */
+    async function exportFullResolution(): Promise<void> {
+        const { targetWidth, targetHeight, lines, circles, noiseSeed } = state;
+        
+        ui.showProgress('Preparing export...');
+        
+        // Check if we need tiled rendering
+        const useTiling = needsTiledRendering(targetWidth, targetHeight);
+        
+        if (!useTiling) {
+            // Simple case: render directly at full resolution
+            ui.updateProgress('Rendering...');
+            
+            const exportP5 = p.createGraphics(targetWidth, targetHeight, p.WEBGL);
+            exportP5.pixelDensity(1);
+            
+            // Compute full-res region data (shapes are already at target resolution)
+            const regionData = computeRegionData(lines, circles, targetWidth, targetHeight);
+            
+            const exportRenderer = new ShaderRenderer(exportP5, p);
+            exportRenderer.init();
+            
+            const config: StainedGlassConfig = { ...STAINED_GLASS, noiseSeed };
+            // Scale = 1.0 for full resolution export
+            exportRenderer.render(regionData, config, lines, circles, 1.0);
+            
+            const canvas = (exportP5 as unknown as { canvas: HTMLCanvasElement }).canvas;
+            downloadCanvas(canvas, `cue-${targetWidth}x${targetHeight}.png`);
+            
+            exportRenderer.dispose();
+            exportP5.remove();
+            
+            ui.hideProgress();
+            return;
+        }
+        
+        // Tiled rendering for large images
+        const tiles = calculateTileGrid(targetWidth, targetHeight, MAX_TILE_SIZE);
+        const totalTiles = tiles.length;
+        
+        ui.updateProgress(`Computing regions...`);
+        
+        // Compute full-resolution region data once
+        const fullRegionData = computeRegionData(lines, circles, targetWidth, targetHeight);
+        
+        const renderedTiles: { canvas: HTMLCanvasElement; info: TileInfo }[] = [];
+        
+        for (let i = 0; i < tiles.length; i++) {
+            const tile = tiles[i];
+            ui.updateProgress(`Rendering tile ${i + 1}/${totalTiles}...`);
+            
+            await new Promise(resolve => setTimeout(resolve, 10));
+            
+            const tileP5 = p.createGraphics(tile.width, tile.height, p.WEBGL);
+            tileP5.pixelDensity(1);
+            
+            const tileRegionData = extractTileRegionData(fullRegionData, tile, targetWidth, targetHeight);
+            
+            const { lines: tileLines, circles: tileCircles } = scaleShapesForTile(
+                lines, circles, tile, targetWidth, targetHeight
+            );
+            
+            const tileRenderer = new ShaderRenderer(tileP5, p);
+            tileRenderer.init();
+            
+            const config: StainedGlassConfig = { ...STAINED_GLASS, noiseSeed };
+            const tileConfig: TileConfig = {
+                tileOffset: { x: tile.x, y: tile.y },
+                fullResolution: { width: targetWidth, height: targetHeight },
+            };
+            
+            // Scale = 1.0 for full resolution export
+            tileRenderer.render(tileRegionData, config, tileLines, tileCircles, 1.0, tileConfig);
+            
+            const tileCanvas = (tileP5 as unknown as { canvas: HTMLCanvasElement }).canvas;
+            
+            const copyCanvas = document.createElement('canvas');
+            copyCanvas.width = tile.width;
+            copyCanvas.height = tile.height;
+            const ctx = copyCanvas.getContext('2d');
+            ctx?.drawImage(tileCanvas, 0, 0);
+            
+            renderedTiles.push({ canvas: copyCanvas, info: tile });
+            
+            tileRenderer.dispose();
+            tileP5.remove();
+        }
+        
+        ui.updateProgress('Compositing...');
+        await new Promise(resolve => setTimeout(resolve, 10));
+        
+        const finalCanvas = compositeTiles(renderedTiles, targetWidth, targetHeight);
+        downloadCanvas(finalCanvas, `cue-${targetWidth}x${targetHeight}.png`);
+        
+        ui.hideProgress();
+    }
+
     p.setup = () => {
-        p.createCanvas(CANVAS.width, CANVAS.height, p.WEBGL);
+        p.createCanvas(400, 300, p.WEBGL);
         p.pixelDensity(1);
 
-        // Create off-screen buffer for shape detection
-        shapeBuffer = p.createGraphics(CANVAS.width, CANVAS.height);
-        shapeBuffer.pixelDensity(1);
-
-        // Initialize shader renderer
         shaderRenderer = new ShaderRenderer(p);
         shaderRenderer.init();
 
-        generateArt();
-    };
-
-    p.draw = () => {
+        ui = new UI({
+            onGenerate: (width, height) => {
+                generateArt(width, height);
+            },
+            onExport: () => {
+                exportFullResolution();
+            },
+        });
+        ui.init();
+        ui.showModal();
+        
         p.noLoop();
     };
 
+    p.draw = () => {
+        // Drawing is handled by generateArt
+    };
+
     p.mousePressed = () => {
-        generateArt();
+        const canvas = (p as unknown as { canvas: HTMLCanvasElement }).canvas;
+        
+        if (
+            p.mouseX >= 0 && p.mouseX <= p.width &&
+            p.mouseY >= 0 && p.mouseY <= p.height
+        ) {
+            generateArt(state.targetWidth, state.targetHeight);
+        }
+    };
+
+    p.windowResized = () => {
+        if (state.targetWidth > 0 && state.targetHeight > 0) {
+            // Recalculate display scale for new window size
+            const { displayScale } = calculatePreviewDimensions(state.targetWidth, state.targetHeight);
+            state.displayScale = displayScale;
+            applyDisplayScale(displayScale);
+        }
     };
 };
 

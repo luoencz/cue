@@ -1,6 +1,6 @@
 import p5 from 'p5';
 import { HSB, generateDistinctColor, hsbObjToRgb } from './color';
-import { LINES, CIRCLES, COLORS } from './config';
+import { LINES, CIRCLES, COLORS, REFERENCE_RESOLUTION } from './config';
 
 type Edge = 'top' | 'bottom' | 'left' | 'right';
 
@@ -21,6 +21,25 @@ export interface CircleConfig {
     radius: number;
     color: HSB;
     weight: number;
+}
+
+/**
+ * Calculate scale factors for resolution-based shape generation.
+ * Shape counts scale with sqrt(area), sizes scale with linear dimension.
+ */
+export function getResolutionScale(width: number, height: number): {
+    countScale: number;  // For scaling number of shapes
+    sizeScale: number;   // For scaling shape sizes (radius, etc.)
+} {
+    const refArea = REFERENCE_RESOLUTION.width * REFERENCE_RESOLUTION.height;
+    const targetArea = width * height;
+    const refDimension = Math.min(REFERENCE_RESOLUTION.width, REFERENCE_RESOLUTION.height);
+    const targetDimension = Math.min(width, height);
+    
+    return {
+        countScale: Math.sqrt(targetArea / refArea),
+        sizeScale: targetDimension / refDimension,
+    };
 }
 
 //=============================================================================
@@ -99,10 +118,20 @@ export function drawLineToBuffer(buffer: p5.Graphics, line: LineConfig): void {
 //=============================================================================
 
 /**
- * Generate a random circle within the canvas bounds
+ * Generate a random circle within the canvas bounds.
+ * @param sizeScale - Scale factor for radius (1.0 = reference resolution)
  */
-export function generateCircle(p: p5, index: number, width: number, height: number): CircleConfig {
-    const radius = p.random(CIRCLES.radiusMin, CIRCLES.radiusMax);
+export function generateCircle(
+    p: p5,
+    index: number,
+    width: number,
+    height: number,
+    sizeScale: number = 1.0
+): CircleConfig {
+    // Scale radius based on resolution so circles cover proportional area
+    const scaledRadiusMin = CIRCLES.radiusMin * sizeScale;
+    const scaledRadiusMax = CIRCLES.radiusMax * sizeScale;
+    const radius = p.random(scaledRadiusMin, scaledRadiusMax);
 
     // Keep center within canvas with some margin
     const margin = radius * 0.5;
@@ -123,12 +152,19 @@ export function generateCircle(p: p5, index: number, width: number, height: numb
 }
 
 /**
- * Generate multiple circles
+ * Generate multiple circles with resolution-based scaling.
+ * @param sizeScale - Scale factor for radius (1.0 = reference resolution)
  */
-export function generateCircles(p: p5, count: number, width: number, height: number): CircleConfig[] {
+export function generateCircles(
+    p: p5,
+    count: number,
+    width: number,
+    height: number,
+    sizeScale: number = 1.0
+): CircleConfig[] {
     const circles: CircleConfig[] = [];
     for (let i = 0; i < count; i++) {
-        circles.push(generateCircle(p, i, width, height));
+        circles.push(generateCircle(p, i, width, height, sizeScale));
     }
     return circles;
 }

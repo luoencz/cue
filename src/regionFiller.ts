@@ -1,4 +1,4 @@
-import { DistanceField, calculateDistanceField, extractBoundaries } from './sdf';
+import { extractBoundaries } from './sdf';
 import { HSB, generateDistinctColor } from './color';
 import { COLORS } from './config';
 
@@ -6,12 +6,12 @@ const LINE_THRESHOLD = 50; // Pixels darker than this are considered lines
 const BOUNDARY_ID = 255;   // Reserved ID for boundary pixels
 
 /**
- * Result of region detection - ready for shader rendering
+ * Result of region detection - ready for shader rendering.
+ * Distance field is now computed analytically in the shader using SDF.
  */
 export interface RegionData {
-    ids: Uint8Array;              // Region ID per pixel (0-254 = regions, 255 = boundary)
-    colors: HSB[];                // Color for each region
-    distanceField: DistanceField; // SDF for edge effects
+    ids: Uint8Array;    // Region ID per pixel (0-254 = regions, 255 = boundary)
+    colors: HSB[];      // Color for each region
 }
 
 /**
@@ -24,8 +24,9 @@ interface Span {
 }
 
 /**
- * Detect regions and compute SDF from a line buffer.
- * Returns data ready for GPU shader rendering.
+ * Detect regions from a line buffer using flood fill.
+ * Returns region IDs and colors ready for GPU shader rendering.
+ * Distance effects are computed analytically in the shader using SDF.
  */
 export function detectRegions(
     linePixels: Uint8ClampedArray,
@@ -36,9 +37,6 @@ export function detectRegions(
 
     // Extract boundaries from line buffer
     const boundaries = extractBoundaries(linePixels, width, height, LINE_THRESHOLD);
-
-    // Calculate distance field for edge effects
-    const distanceField = calculateDistanceField(boundaries, width, height);
 
     // Initialize region IDs - boundaries marked as 255
     const ids = new Uint8Array(totalPixels);
@@ -83,7 +81,7 @@ export function detectRegions(
         }
     }
 
-    return { ids, colors, distanceField };
+    return { ids, colors };
 }
 
 /**

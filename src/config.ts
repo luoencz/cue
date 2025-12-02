@@ -4,13 +4,29 @@
  */
 
 //=============================================================================
-// CANVAS
+// RESOLUTION PRESETS
 //=============================================================================
 
-export const CANVAS = {
-    width: 3456,
-    height: 2234,
-};
+export interface Resolution {
+    name: string;
+    width: number;
+    height: number;
+    description: string;
+}
+
+export const RESOLUTION_PRESETS: Resolution[] = [
+    { name: '4K Ultra HD', width: 3840, height: 2160, description: 'Desktop wallpaper, prints' },
+    { name: '2K QHD', width: 2560, height: 1440, description: 'High-res desktop' },
+    { name: 'Full HD', width: 1920, height: 1080, description: 'Standard desktop' },
+    { name: 'Phone Portrait', width: 1170, height: 2532, description: 'iPhone 14/15' },
+    { name: 'Phone Landscape', width: 2532, height: 1170, description: 'iPhone 14/15' },
+    { name: 'Tablet', width: 2048, height: 2732, description: 'iPad Pro' },
+    { name: 'Square', width: 2048, height: 2048, description: 'Social media' },
+    { name: 'Instagram Story', width: 1080, height: 1920, description: '9:16 vertical' },
+];
+
+/** Maximum tile size for mobile-safe rendering */
+export const MAX_TILE_SIZE = 1024;
 
 //=============================================================================
 // LINE GENERATION
@@ -49,6 +65,13 @@ export const CIRCLES = {
 // STAINED GLASS EFFECT
 //=============================================================================
 
+/** 
+ * Reference resolution for shape scaling.
+ * Shape counts and sizes are defined for this resolution,
+ * then scaled based on target canvas area/dimensions.
+ */
+export const REFERENCE_RESOLUTION = { width: 1920, height: 1080 };
+
 export const STAINED_GLASS = {
     //-------------------------------------------------------------------------
     // Light Transmission
@@ -60,8 +83,8 @@ export const STAINED_GLASS = {
     /** Subtle darkening at edges near the leading (0-1) */
     edgeDarken: 0.1,
 
-    /** How far the glow extends from center (0-1, higher = larger glow area) */
-    glowFalloff: 0.1,
+    /** Distance for glow falloff in pixels (fixed visual quality) */
+    glowFalloff: 100,
 
     //-------------------------------------------------------------------------
     // Glass Texture (Noise)
@@ -96,10 +119,10 @@ export const LEADING = {
     /** Color of the boundary lines in the shader (RGB 0-1) */
     color: { r: 0.08, g: 0.06, b: 0.04 },  // Dark brown like lead came
 
-    /** Corner rounding radius in pixels */
+    /** Corner rounding radius in pixels (fixed visual quality) */
     roundingRadius: 15,
 
-    /** Base thickness of the leading in pixels */
+    /** Base thickness of the leading in pixels (fixed visual quality) */
     thickness: 4,
 };
 
@@ -119,7 +142,7 @@ export const WATERCOLOR = {
     // Wavy Leading (organic hand-drawn look)
     //-------------------------------------------------------------------------
 
-    /** How much the leading lines wobble in pixels */
+    /** How much the leading lines wobble in pixels (fixed visual quality) */
     wobbleAmount: 4,
 
     /** Scale of the wobble pattern (lower = larger waves) */

@@ -4,16 +4,17 @@ varying vec2 vTexCoord;
 
 // Textures
 uniform sampler2D uRegionTex;    // R channel = region ID (0-255)
-uniform sampler2D uDistanceTex;  // R channel = normalized distance (0-1)
 uniform sampler2D uColorsTex;    // 256x1 texture with region colors
 
 // Canvas dimensions for pixel-space calculations
 uniform vec2 uResolution;
+uniform vec2 uFullResolution;  // Full output resolution (for tiled rendering)
+uniform vec2 uTileOffset;      // Offset of current tile in full image
 
 // Stained glass parameters
 uniform float uCenterGlow;       // How much brighter the center is (0-1)
 uniform float uEdgeDarken;       // Subtle darkening at edges (0-1)
-uniform float uGlowFalloff;      // How quickly the glow falls off
+uniform float uGlowFalloff;      // Distance for glow falloff (in pixels)
 
 // Noise texture parameters
 uniform float uNoiseScale;       // Scale of noise features
@@ -196,15 +197,25 @@ float filmGrain(vec2 coord, float seed) {
 // STAINED GLASS COLOR COMPUTATION (with watercolor effects)
 //=============================================================================
 
-vec3 computeGlassColor(vec2 pixelCoord, vec2 texCoord) {
+/**
+ * Compute glass color using analytical SDF for distance-based effects.
+ * This eliminates tiling artifacts by computing distance directly from shapes
+ * rather than sampling from a per-tile texture.
+ * 
+ * @param pixelCoord - Global pixel coordinate
+ * @param texCoord - Texture coordinate for region lookup
+ * @param sdfDistance - Analytical SDF distance from leading (in pixels)
+ */
+vec3 computeGlassColor(vec2 pixelCoord, vec2 texCoord, float sdfDistance) {
     // Sample region ID
     float regionId = texture2D(uRegionTex, texCoord).r;
 
     // Get base color from palette
     vec3 baseColor = texture2D(uColorsTex, vec2(regionId, 0.5)).rgb;
 
-    // Sample distance field (0 at edge, higher toward center)
-    float dist = texture2D(uDistanceTex, texCoord).r;
+    // Use analytical SDF distance for effects
+    // sdfDistance is in pixels, higher = further from leading
+    float dist = sdfDistance;
 
     // -------------------------------------------------------------------------
     // WATERCOLOR COLOR BLEEDING - Large-scale hue/saturation variation
@@ -216,6 +227,7 @@ vec3 computeGlassColor(vec2 pixelCoord, vec2 texCoord) {
     // -------------------------------------------------------------------------
     // CENTER GLOW - Light transmission effect
     // -------------------------------------------------------------------------
+    // uGlowFalloff is now in pixels (resolution-relative)
     float glowFactor = smoothstep(0.0, uGlowFalloff, dist);
     float centerBrightness = glowFactor * uCenterGlow;
 
@@ -269,15 +281,13 @@ vec3 computeGlassColor(vec2 pixelCoord, vec2 texCoord) {
 //=============================================================================
 
 void main() {
-    vec2 pixelCoord = vTexCoord * uResolution;
+    // Local pixel coordinate within this tile
+    vec2 localPixelCoord = vTexCoord * uResolution;
+    // Global pixel coordinate in full image (for consistent noise/patterns across tiles)
+    vec2 pixelCoord = localPixelCoord + uTileOffset;
 
     // =========================================================================
-    // 1. COMPUTE GLASS COLOR (always needed for proper blending)
-    // =========================================================================
-    vec3 glassColor = computeGlassColor(pixelCoord, vTexCoord);
-
-    // =========================================================================
-    // 2. WOBBLY LEADING - Organic hand-drawn look
+    // 1. COMPUTE ANALYTICAL SDF (used for both leading and glass effects)
     // =========================================================================
     // Distort position before SDF calculation for wavy lines
     vec2 wobble = vec2(
@@ -286,25 +296,34 @@ void main() {
     );
     vec2 wobbledCoord = pixelCoord + wobble;
 
-    float leadingSDF = computeLeadingSDF(wobbledCoord);
+    // Compute SDF once - reused for leading and glass effects
+    float sdf = computeLeadingSDF(wobbledCoord);
 
+    // =========================================================================
+    // 2. COMPUTE GLASS COLOR (uses analytical SDF for distance effects)
+    // =========================================================================
+    vec3 glassColor = computeGlassColor(pixelCoord, vTexCoord, sdf);
+
+    // =========================================================================
+    // 3. WOBBLY LEADING - Organic hand-drawn look
+    // =========================================================================
     // Anti-aliasing width in pixels
     float aaWidth = 1.5;
 
     // Compute blend factor: 1.0 = fully leading, 0.0 = fully glass
-    float leadingBlend = 1.0 - smoothstep(uLeadingThickness - aaWidth, uLeadingThickness, leadingSDF);
+    float leadingBlend = 1.0 - smoothstep(uLeadingThickness - aaWidth, uLeadingThickness, sdf);
 
     // Compute leading color with inner shading for depth
-    float innerShade = smoothstep(0.0, uLeadingThickness * 0.5, leadingSDF) * 0.15 + 0.85;
+    float innerShade = smoothstep(0.0, uLeadingThickness * 0.5, sdf) * 0.15 + 0.85;
     vec3 leadingColor = uLeadingColor * innerShade;
 
     // =========================================================================
-    // 3. BLEND LEADING WITH GLASS
+    // 4. BLEND LEADING WITH GLASS
     // =========================================================================
     vec3 finalColor = mix(glassColor, leadingColor, leadingBlend);
 
     // =========================================================================
-    // 4. FILM GRAIN - Visible texture overlay
+    // 5. FILM GRAIN - Visible texture overlay
     // =========================================================================
     float grain = filmGrain(pixelCoord, uNoiseSeed);
     finalColor += grain * uGrainIntensity;
