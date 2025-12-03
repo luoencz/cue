@@ -378,10 +378,12 @@ const sketch = (p: p5) => {
         // Drawing is handled by generateArt
     };
 
-    p.mousePressed = () => {
+    p.mousePressed = (event?: MouseEvent) => {
         const canvas = (p as unknown as { canvas: HTMLCanvasElement }).canvas;
         
+        // Only regenerate if the click was directly on the canvas element
         if (
+            event?.target === canvas &&
             p.mouseX >= 0 && p.mouseX <= p.width &&
             p.mouseY >= 0 && p.mouseY <= p.height
         ) {

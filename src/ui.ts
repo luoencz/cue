@@ -3,6 +3,7 @@
  */
 
 import { RESOLUTION_PRESETS, Resolution } from './config';
+import './ui.css';
 
 export interface UICallbacks {
     onGenerate: (width: number, height: number) => void;
@@ -21,6 +22,7 @@ export class UI {
     private customHeight: number = 1080;
     private isCustom: boolean = false;
     private callbacks: UICallbacks;
+    private hasGeneratedOnce: boolean = false;
 
     constructor(callbacks: UICallbacks) {
         this.callbacks = callbacks;
@@ -49,7 +51,6 @@ export class UI {
      * Initialize the UI - creates modal and attaches to DOM
      */
     init(): void {
-        this.injectStyles();
         this.createModal();
     }
 
@@ -89,333 +90,6 @@ export class UI {
         if (resLabel) {
             resLabel.textContent = `${width} × ${height}`;
         }
-    }
-
-    private injectStyles(): void {
-        const style = document.createElement('style');
-        style.textContent = `
-            @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap');
-
-            :root {
-                --cue-bg: #0a0908;
-                --cue-surface: #151311;
-                --cue-surface-hover: #1f1c19;
-                --cue-border: #2a2622;
-                --cue-text: #e8e4df;
-                --cue-text-dim: #8a857e;
-                --cue-accent: #c9a66b;
-                --cue-accent-glow: rgba(201, 166, 107, 0.15);
-                --cue-error: #d4776b;
-            }
-
-            .cue-modal-overlay {
-                position: fixed;
-                inset: 0;
-                background: rgba(10, 9, 8, 0.92);
-                backdrop-filter: blur(20px);
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                z-index: 1000;
-                opacity: 0;
-                pointer-events: none;
-                transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-            }
-
-            .cue-modal-overlay.visible {
-                opacity: 1;
-                pointer-events: auto;
-            }
-
-            .cue-modal {
-                background: var(--cue-surface);
-                border: 1px solid var(--cue-border);
-                border-radius: 16px;
-                padding: 48px;
-                max-width: 560px;
-                width: 90%;
-                max-height: 90vh;
-                overflow-y: auto;
-                transform: translateY(20px) scale(0.96);
-                transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-            }
-
-            .cue-modal-overlay.visible .cue-modal {
-                transform: translateY(0) scale(1);
-            }
-
-            .cue-title {
-                font-family: 'Instrument Serif', Georgia, serif;
-                font-size: 42px;
-                font-weight: 400;
-                color: var(--cue-text);
-                margin: 0 0 8px 0;
-                letter-spacing: -0.02em;
-            }
-
-            .cue-subtitle {
-                font-family: 'DM Mono', monospace;
-                font-size: 13px;
-                color: var(--cue-text-dim);
-                margin: 0 0 40px 0;
-                text-transform: uppercase;
-                letter-spacing: 0.1em;
-            }
-
-            .cue-section-label {
-                font-family: 'DM Mono', monospace;
-                font-size: 11px;
-                color: var(--cue-text-dim);
-                text-transform: uppercase;
-                letter-spacing: 0.15em;
-                margin: 0 0 16px 0;
-            }
-
-            .cue-presets {
-                display: grid;
-                grid-template-columns: repeat(2, 1fr);
-                gap: 10px;
-                margin-bottom: 32px;
-            }
-
-            .cue-preset {
-                background: transparent;
-                border: 1px solid var(--cue-border);
-                border-radius: 10px;
-                padding: 16px;
-                cursor: pointer;
-                text-align: left;
-                transition: all 0.2s ease;
-            }
-
-            .cue-preset:hover {
-                background: var(--cue-surface-hover);
-                border-color: var(--cue-text-dim);
-            }
-
-            .cue-preset.selected {
-                background: var(--cue-accent-glow);
-                border-color: var(--cue-accent);
-            }
-
-            .cue-preset-name {
-                font-family: 'DM Mono', monospace;
-                font-size: 14px;
-                font-weight: 500;
-                color: var(--cue-text);
-                margin: 0 0 4px 0;
-            }
-
-            .cue-preset-dims {
-                font-family: 'DM Mono', monospace;
-                font-size: 12px;
-                color: var(--cue-text-dim);
-                margin: 0;
-            }
-
-            .cue-custom-toggle {
-                display: flex;
-                align-items: center;
-                gap: 12px;
-                margin-bottom: 16px;
-                cursor: pointer;
-            }
-
-            .cue-checkbox {
-                width: 20px;
-                height: 20px;
-                border: 1px solid var(--cue-border);
-                border-radius: 4px;
-                background: transparent;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                transition: all 0.2s ease;
-            }
-
-            .cue-checkbox.checked {
-                background: var(--cue-accent);
-                border-color: var(--cue-accent);
-            }
-
-            .cue-checkbox svg {
-                width: 12px;
-                height: 12px;
-                stroke: var(--cue-bg);
-                stroke-width: 3;
-                opacity: 0;
-                transition: opacity 0.15s ease;
-            }
-
-            .cue-checkbox.checked svg {
-                opacity: 1;
-            }
-
-            .cue-custom-label {
-                font-family: 'DM Mono', monospace;
-                font-size: 13px;
-                color: var(--cue-text);
-            }
-
-            .cue-custom-inputs {
-                display: grid;
-                grid-template-columns: 1fr auto 1fr;
-                gap: 12px;
-                align-items: center;
-                margin-bottom: 32px;
-                opacity: 0.4;
-                pointer-events: none;
-                transition: opacity 0.2s ease;
-            }
-
-            .cue-custom-inputs.active {
-                opacity: 1;
-                pointer-events: auto;
-            }
-
-            .cue-input {
-                font-family: 'DM Mono', monospace;
-                font-size: 16px;
-                background: var(--cue-bg);
-                border: 1px solid var(--cue-border);
-                border-radius: 8px;
-                padding: 14px 16px;
-                color: var(--cue-text);
-                width: 100%;
-                text-align: center;
-                transition: border-color 0.2s ease;
-            }
-
-            .cue-input:focus {
-                outline: none;
-                border-color: var(--cue-accent);
-            }
-
-            .cue-input::placeholder {
-                color: var(--cue-text-dim);
-            }
-
-            .cue-times {
-                font-family: 'DM Mono', monospace;
-                font-size: 18px;
-                color: var(--cue-text-dim);
-            }
-
-            .cue-generate-btn {
-                width: 100%;
-                font-family: 'Instrument Serif', Georgia, serif;
-                font-size: 20px;
-                font-style: italic;
-                background: var(--cue-accent);
-                color: var(--cue-bg);
-                border: none;
-                border-radius: 10px;
-                padding: 18px 32px;
-                cursor: pointer;
-                transition: all 0.2s ease;
-                letter-spacing: 0.02em;
-            }
-
-            .cue-generate-btn:hover {
-                background: #d9b87b;
-                transform: translateY(-1px);
-            }
-
-            .cue-generate-btn:active {
-                transform: translateY(0);
-            }
-
-            /* Controls Bar */
-            .cue-controls {
-                position: fixed;
-                bottom: 24px;
-                left: 50%;
-                transform: translateX(-50%) translateY(100px);
-                background: var(--cue-surface);
-                border: 1px solid var(--cue-border);
-                border-radius: 12px;
-                padding: 12px 20px;
-                display: flex;
-                align-items: center;
-                gap: 20px;
-                z-index: 100;
-                opacity: 0;
-                transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-            }
-
-            .cue-controls.visible {
-                transform: translateX(-50%) translateY(0);
-                opacity: 1;
-            }
-
-            .resolution-label {
-                font-family: 'DM Mono', monospace;
-                font-size: 13px;
-                color: var(--cue-text-dim);
-            }
-
-            .cue-controls-divider {
-                width: 1px;
-                height: 24px;
-                background: var(--cue-border);
-            }
-
-            .cue-icon-btn {
-                background: transparent;
-                border: none;
-                padding: 8px;
-                cursor: pointer;
-                color: var(--cue-text-dim);
-                border-radius: 6px;
-                transition: all 0.15s ease;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            }
-
-            .cue-icon-btn:hover {
-                background: var(--cue-surface-hover);
-                color: var(--cue-text);
-            }
-
-            .cue-icon-btn svg {
-                width: 20px;
-                height: 20px;
-            }
-
-            .cue-hint {
-                font-family: 'DM Mono', monospace;
-                font-size: 11px;
-                color: var(--cue-text-dim);
-                text-align: center;
-                margin-top: 24px;
-            }
-
-            /* Progress indicator */
-            .cue-progress {
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                background: var(--cue-surface);
-                border: 1px solid var(--cue-border);
-                border-radius: 12px;
-                padding: 24px 40px;
-                z-index: 2000;
-                display: none;
-            }
-
-            .cue-progress.visible {
-                display: block;
-            }
-
-            .cue-progress-text {
-                font-family: 'DM Mono', monospace;
-                font-size: 14px;
-                color: var(--cue-text);
-            }
-        `;
-        document.head.appendChild(style);
     }
 
     private createModal(): void {
@@ -464,6 +138,14 @@ export class UI {
         this.modal = overlay;
 
         this.attachModalEvents(modal);
+        
+        // Close modal when clicking outside (on overlay background)
+        // Only allow closing if user has generated at least once
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay && this.hasGeneratedOnce) {
+                this.hideModal();
+            }
+        });
     }
 
     private attachModalEvents(modal: HTMLElement): void {
@@ -526,6 +208,7 @@ export class UI {
             this.showControls();
             this.updateResolutionDisplay(width, height);
             this.callbacks.onGenerate(width, height);
+            this.hasGeneratedOnce = true;
         });
     }
 
