@@ -6,9 +6,9 @@ import { LineConfig, CircleConfig } from './generators';
 
 // Import shaders as raw strings
 // @ts-ignore
-import vertShader from '../shaders/region.vert' with { type: 'text' };
+import vertShader from '../shaders/region.vert' with { type: 'text' }
 // @ts-ignore
-import fragShader from '../shaders/region.frag' with { type: 'text' };
+import fragShader from '../shaders/region.frag' with { type: 'text' }
 
 /**
  * Tile rendering configuration for high-res export
@@ -25,15 +25,19 @@ export interface RegionData {
 
 /**
  * Pack line endpoints into array of vec4 for shader uniforms.
- * Each vec4 = [x1, y1, x2, y2] in pixel coordinates
+ * Each vec4 = [x1, y1, x2, y2] in pixel coordinates.
+ * Denormalizes from [0,1] to pixel coordinates using provided dimensions.
  */
-function packLinesForShader(lines: LineConfig[]): number[] {
+function packLinesForShader(lines: LineConfig[], width: number, height: number): number[] {
     const data: number[] = [];
     const count = Math.min(lines.length, MAX_SHADER_LINES);
 
     for (let i = 0; i < count; i++) {
         const line = lines[i];
-        data.push(line.start.x, line.start.y, line.end.x, line.end.y);
+        data.push(
+            line.start.x * width, line.start.y * height,
+            line.end.x * width, line.end.y * height
+        );
     }
 
     // Pad to MAX_LINES vec4s (4 floats each)
@@ -46,15 +50,21 @@ function packLinesForShader(lines: LineConfig[]): number[] {
 
 /**
  * Pack circles into array of vec3 for shader uniforms.
- * Each vec3 = [centerX, centerY, radius] in pixel coordinates
+ * Each vec3 = [centerX, centerY, radius] in pixel coordinates.
+ * Denormalizes from [0,1] to pixel coordinates using provided dimensions.
  */
-function packCirclesForShader(circles: CircleConfig[]): number[] {
+function packCirclesForShader(circles: CircleConfig[], width: number, height: number): number[] {
     const data: number[] = [];
     const count = Math.min(circles.length, MAX_SHADER_CIRCLES);
+    const smallerDimension = Math.min(width, height);
 
     for (let i = 0; i < count; i++) {
         const circle = circles[i];
-        data.push(circle.center.x, circle.center.y, circle.radius);
+        data.push(
+            circle.center.x * width,
+            circle.center.y * height,
+            circle.radius * smallerDimension
+        );
     }
 
     // Pad to MAX_SHADER_CIRCLES vec3s (3 floats each)
@@ -156,13 +166,13 @@ export class ShaderRenderer {
         this.shader.setUniform('uNoiseIntensity', config.stainedGlass.noiseIntensity);
         this.shader.setUniform('uNoiseSeed', noiseSeed);
 
-        // Line uniforms for analytical SDF
-        const lineData = packLinesForShader(lines);
+        // Line uniforms for analytical SDF (denormalize to full resolution for consistent SDF)
+        const lineData = packLinesForShader(lines, fullWidth, fullHeight);
         this.shader.setUniform('uLines', lineData);
         this.shader.setUniform('uLineCount', Math.min(lines.length, MAX_SHADER_LINES));
 
-        // Circle uniforms for analytical SDF
-        const circleData = packCirclesForShader(circles);
+        // Circle uniforms for analytical SDF (denormalize to full resolution for consistent SDF)
+        const circleData = packCirclesForShader(circles, fullWidth, fullHeight);
         this.shader.setUniform('uCircles', circleData);
         this.shader.setUniform('uCircleCount', Math.min(circles.length, MAX_SHADER_CIRCLES));
 

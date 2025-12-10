@@ -40,10 +40,3 @@ export const LINE_THRESHOLD = 50;
 
 /** Reserved region ID for boundary pixels (max uint8 value) */
 export const BOUNDARY_ID = 255;
-
-/** 
- * Reference resolution for shape scaling.
- * Shape counts and sizes are defined for this resolution,
- * then scaled based on target canvas area/dimensions.
- */
-export const REFERENCE_RESOLUTION = { width: 1920, height: 1080 };

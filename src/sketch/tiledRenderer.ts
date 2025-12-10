@@ -5,9 +5,7 @@
  * mobile WebGL texture size limits, then composites them together.
  */
 
-import p5 from 'p5';
 import { MAX_TILE_SIZE } from '../config/constants';
-import { LineConfig, CircleConfig } from './generators';
 import { RegionData } from './regionFiller';
 
 export interface TileInfo {
@@ -102,24 +100,6 @@ export function compositeTiles(
 }
 
 /**
- * Get shapes for a specific tile.
- * Shapes stay in global coordinates - the shader uses uTileOffset
- * to compute pixel positions in global space, so shapes must also be global.
- */
-export function scaleShapesForTile(
-    lines: LineConfig[],
-    circles: CircleConfig[],
-    tile: TileInfo,
-    fullWidth: number,
-    fullHeight: number
-): { lines: LineConfig[]; circles: CircleConfig[] } {
-    // Shapes stay in global coordinates
-    // The shader computes SDF using global pixel coords (localPixelCoord + uTileOffset)
-    // so shapes must also be in global coords for correct distance calculations
-    return { lines, circles };
-}
-
-/**
  * Extract a tile region from full-resolution data arrays.
  * Only extracts region IDs - distance is computed analytically in shader.
  */
@@ -161,11 +141,4 @@ export function downloadCanvas(canvas: HTMLCanvasElement, filename: string = 'cu
     link.click();
 }
 
-/**
- * Get a p5 canvas element
- */
-export function getP5Canvas(p: p5): HTMLCanvasElement {
-    // p5's canvas is accessed through the canvas property
-    return (p as unknown as { canvas: HTMLCanvasElement }).canvas;
-}
 

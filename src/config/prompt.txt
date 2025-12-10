@@ -1,0 +1,14 @@
+Analyze the following text and rate it on three psychological dimensions. Return ONLY a JSON object with three numbers between 0 and 1.
+
+Dimensions:
+1. VALENCE (emotional tone): 0 = dark, melancholic, negative → 1 = bright, joyful, positive
+2. AROUSAL (energy level): 0 = calm, peaceful, minimal → 1 = intense, energetic, dynamic  
+3. FOCUS (clarity): 0 = dreamy, soft, diffuse → 1 = sharp, precise, detailed
+
+Text to analyze:
+"""
+{PROMPT}
+"""
+
+Respond with ONLY valid JSON in this exact format, no other text:
+{"valence": 0.X, "arousal": 0.X, "focus": 0.X}

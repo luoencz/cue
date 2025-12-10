@@ -2,87 +2,18 @@
  * Config Resolver - Resolves ConfigTemplate to AppConfig
  * 
  * Uses beta distribution sampling and sentiment dimensions to generate final values.
+ * Now uses a generic recursive resolver that automatically handles any config structure.
  */
 
-import { PromptDimensions } from '../llms/promptAnalyzer';
+import { PromptDimensions, DEFAULT_DIMENSIONS, ConfigValueType } from './types';
 import { 
     ConfigTemplate, 
     AppConfig, 
-    SeededValue, 
-    ConfigValue, 
-    isSeededValue,
-    SeedDimension
+    SeededValue,
+    Resolved,
 } from './types';
 import { CONFIG_TEMPLATE } from './config';
-
-/**
- * Sample from a Beta distribution using the Joehnk algorithm.
- * Returns a value in [0, 1].
- */
-function sampleBeta(alpha: number, beta: number): number {
-    // For alpha, beta >= 1, use rejection sampling
-    // For simplicity, use the inverse transform via gamma functions approximation
-    
-    // Joehnk's algorithm for alpha, beta < 1 or simple cases
-    if (alpha === 1 && beta === 1) {
-        return Math.random(); // Uniform
-    }
-    
-    // Use the ratio of gamma variates method
-    const gammaA = sampleGamma(alpha);
-    const gammaB = sampleGamma(beta);
-    return gammaA / (gammaA + gammaB);
-}
-
-/**
- * Sample from Gamma distribution using Marsaglia and Tsang's method
- */
-function sampleGamma(shape: number): number {
-    if (shape < 1) {
-        // Boost for shape < 1
-        return sampleGamma(shape + 1) * Math.pow(Math.random(), 1 / shape);
-    }
-    
-    const d = shape - 1/3;
-    const c = 1 / Math.sqrt(9 * d);
-    
-    while (true) {
-        let x: number;
-        let v: number;
-        
-        do {
-            x = randomNormal();
-            v = 1 + c * x;
-        } while (v <= 0);
-        
-        v = v * v * v;
-        const u = Math.random();
-        
-        if (u < 1 - 0.0331 * (x * x) * (x * x)) {
-            return d * v;
-        }
-        
-        if (Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v))) {
-            return d * v;
-        }
-    }
-}
-
-/**
- * Sample from standard normal distribution using Box-Muller
- */
-function randomNormal(): number {
-    const u1 = Math.random();
-    const u2 = Math.random();
-    return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-}
-
-/**
- * Linear interpolation
- */
-function lerp(a: number, b: number, t: number): number {
-    return a + (b - a) * t;
-}
+import { sampleBeta, lerp } from '../utility/math';
 
 /**
  * Resolve a single SeededValue to a number.
@@ -92,128 +23,65 @@ function lerp(a: number, b: number, t: number): number {
  * 2. If seeded, shift t based on dimension value (0.5 = no shift, preserves beta distribution)
  * 3. Map final t to range
  */
-function resolveValue(value: SeededValue, dimensions: PromptDimensions): number {
-    const [alpha, beta] = value.beta ?? [1.5, 1.5];
+export function resolveValue(value: SeededValue, dimensions: PromptDimensions): number {
+    const [alpha, beta] = value.beta;
     const [low, high] = value.range;
     
-    // Sample from beta distribution
     let t = sampleBeta(alpha, beta);
     
-    // If seeded, shift t based on dimension value
-    // sentiment = 0.5 → no shift (pure beta distribution)
-    // sentiment = 1.0 → shift up by influence
-    // sentiment = 0.0 → shift down by influence
     if (value.seed) {
         const dimensionValue = dimensions[value.seed.dimension];
         const influence = value.seed.influence;
         
-        // Offset model: sentiment shifts the beta sample, 0.5 is neutral
         t = t + (dimensionValue - 0.5) * influence * 2;
-        t = Math.max(0, Math.min(1, t)); // clamp to [0, 1]
+        t = Math.max(0, Math.min(1, t));
     }
     
-    // Map to range
     return lerp(low, high, t);
 }
 
 /**
- * Resolve a ConfigValue (number or SeededValue) to a number
+ * Generic recursive resolver that walks the config tree and resolves SeededValues
+ * 
+ * This automatically handles any structure depth without manual mapping.
  */
-function resolveConfigValue(value: ConfigValue, dimensions: PromptDimensions): number {
-    if (isSeededValue(value)) {
-        return resolveValue(value, dimensions);
+function resolveDeep<T>(template: T, dimensions: PromptDimensions): Resolved<T> {
+    if (typeof template === 'object' && template !== null && !Array.isArray(template)) {
+        if ((template as any).type === ConfigValueType.SEEDED) {
+            return resolveValue(template as unknown as SeededValue, dimensions) as any;
+        }
+        
+        const result: any = {};
+        for (const key in template) {
+            if (template.hasOwnProperty(key)) {
+                result[key] = resolveDeep(template[key], dimensions);
+            }
+        }
+        return result;
     }
-    return value;
+    
+    return template as any;
 }
 
 /**
  * Convert density (shapes per megapixel) to count based on target resolution
  */
-function densityToCount(density: number, width: number, height: number, minCount: number = 0): number {
+export function densityToCount(density: number, width: number, height: number): number {
     const megapixels = (width * height) / 1_000_000;
-    return Math.max(minCount, Math.round(density * megapixels));
+    return Math.max(0, Math.round(density * megapixels));
 }
 
 /**
- * Generate a resolved AppConfig from the template, dimensions, and target resolution.
- * Density values are converted to counts based on the target resolution.
+ * Generate a resolved AppConfig from the template and dimensions.
+ * 
+ * If template is not provided, uses CONFIG_TEMPLATE.
+ * If dimensions are not provided, uses default neutral dimensions (0.5 for all).
+ * 
  */
 export function resolveConfig(
-    template: ConfigTemplate,
-    dimensions: PromptDimensions,
-    targetWidth: number,
-    targetHeight: number
+    template: ConfigTemplate = CONFIG_TEMPLATE,
+    dimensions?: PromptDimensions
 ): AppConfig {
-    // Resolve density values first, then convert to counts
-    const lineDensity = resolveValue(template.lines.density, dimensions);
-    const circleDensity = resolveValue(template.circles.density, dimensions);
-    
-    return {
-        lines: {
-            count: densityToCount(lineDensity, targetWidth, targetHeight, 1),  // min 1 line
-            weight: resolveValue(template.lines.weight, dimensions),
-            radius: template.lines.radius !== undefined 
-                ? resolveValue(template.lines.radius, dimensions) 
-                : undefined
-        },
-        circles: {
-            count: densityToCount(circleDensity, targetWidth, targetHeight, 0),
-            weight: resolveValue(template.circles.weight, dimensions),
-            radius: template.circles.radius !== undefined 
-                ? resolveValue(template.circles.radius, dimensions) 
-                : undefined
-        },
-        colors: {
-            hueBase: resolveValue(template.colors.hueBase, dimensions),
-            hueRange: resolveValue(template.colors.hueRange, dimensions),
-            saturation: resolveValue(template.colors.saturation, dimensions),
-            brightness: resolveValue(template.colors.brightness, dimensions)
-        },
-        stainedGlass: {
-            centerGlow: resolveValue(template.stainedGlass.centerGlow, dimensions),
-            edgeDarken: resolveValue(template.stainedGlass.edgeDarken, dimensions),
-            glowFalloff: resolveConfigValue(template.stainedGlass.glowFalloff, dimensions),
-            noiseScale: resolveConfigValue(template.stainedGlass.noiseScale, dimensions),
-            noiseIntensity: resolveValue(template.stainedGlass.noiseIntensity, dimensions)
-        },
-        watercolor: {
-            grainIntensity: resolveValue(template.watercolor.grainIntensity, dimensions),
-            wobbleAmount: resolveValue(template.watercolor.wobbleAmount, dimensions),
-            wobbleScale: resolveValue(template.watercolor.wobbleScale, dimensions),
-            colorBleed: resolveValue(template.watercolor.colorBleed, dimensions),
-            saturationBleed: resolveValue(template.watercolor.saturationBleed, dimensions),
-            bleedScale: resolveConfigValue(template.watercolor.bleedScale, dimensions),
-            edgeIrregularity: resolveConfigValue(template.watercolor.edgeIrregularity, dimensions)
-        },
-        leading: {
-            color: template.leading.color,
-            roundingRadius: resolveConfigValue(template.leading.roundingRadius, dimensions),
-            thickness: resolveConfigValue(template.leading.thickness, dimensions)
-        },
-        referenceResolution: template.referenceResolution
-    };
-}
-
-/**
- * Generate a config using default template and provided dimensions.
- * This is the main entry point for seeded config generation.
- */
-export function generateSeededConfig(
-    dimensions: PromptDimensions,
-    targetWidth: number,
-    targetHeight: number
-): AppConfig {
-    return resolveConfig(CONFIG_TEMPLATE, dimensions, targetWidth, targetHeight);
-}
-
-/**
- * Generate a config with neutral dimensions (0.5 for all).
- * Useful for non-seeded generation.
- */
-export function generateDefaultConfig(targetWidth: number, targetHeight: number): AppConfig {
-    return resolveConfig(CONFIG_TEMPLATE, {
-        valence: 0.5,
-        arousal: 0.5,
-        focus: 0.5
-    }, targetWidth, targetHeight);
+    const dims = dimensions ?? DEFAULT_DIMENSIONS;
+    return resolveDeep(template, dims);
 }

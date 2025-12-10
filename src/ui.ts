@@ -3,15 +3,15 @@
  */
 
 import { RESOLUTION_PRESETS, Resolution } from './config/constants';
-import { analyzePrompt, PromptDimensions, getDefaultDimensions } from './llms/promptAnalyzer';
-import { generateSeededConfig } from './config/seedConfig';
-import { AppConfig } from './config/types';
+import { analyzePrompt } from './llms/promptAnalyzer';
+import { PromptDimensions, DEFAULT_DIMENSIONS, AppConfig } from './config/types';
+import { resolveConfig } from './config/seedConfig';
 import './theme/ui.css';
 
 const API_KEY_STORAGE_KEY = 'cue-anthropic-api-key';
 
 export interface UICallbacks {
-    onGenerate: (width: number, height: number, seededConfig: AppConfig) => void;
+    onGenerate: (width: number, height: number, seededConfig: AppConfig, dimensions: PromptDimensions) => void;
     onExport: () => void;
 }
 
@@ -28,7 +28,6 @@ export class UI {
     private isCustom: boolean = false;
     private callbacks: UICallbacks;
     private hasGeneratedOnce: boolean = false;
-    private lastSeededConfig: AppConfig | null = null;
 
     constructor(callbacks: UICallbacks) {
         this.callbacks = callbacks;
@@ -94,13 +93,6 @@ export class UI {
         if (resLabel) {
             resLabel.textContent = `${width} × ${height}`;
         }
-    }
-
-    /**
-     * Get the last seeded config (for regeneration with same mood)
-     */
-    getLastSeededConfig(): AppConfig | null {
-        return this.lastSeededConfig;
     }
 
     private getStoredApiKey(): string {
@@ -206,7 +198,6 @@ export class UI {
         const apiKeyToggle = modal.querySelector('#api-key-toggle') as HTMLButtonElement;
         const generateBtn = modal.querySelector('#generate-btn') as HTMLButtonElement;
 
-        // Preset selection via dropdown
         presetSelect?.addEventListener('change', () => {
             const value = presetSelect.value;
             if (value === 'custom') {
@@ -221,7 +212,6 @@ export class UI {
             }
         });
 
-        // Custom input changes
         widthInput?.addEventListener('change', () => {
             this.customWidth = Math.max(100, Math.min(8192, parseInt(widthInput.value) || 1920));
             widthInput.value = String(this.customWidth);
@@ -232,29 +222,24 @@ export class UI {
             heightInput.value = String(this.customHeight);
         });
 
-        // API key visibility toggle
         apiKeyToggle?.addEventListener('click', () => {
             const isPassword = apiKeyInput.type === 'password';
             apiKeyInput.type = isPassword ? 'text' : 'password';
             apiKeyToggle.classList.toggle('visible', isPassword);
         });
 
-        // Store API key on blur
         apiKeyInput?.addEventListener('blur', () => {
             this.storeApiKey(apiKeyInput.value.trim());
         });
 
-        // Generate button
         generateBtn?.addEventListener('click', async () => {
             const width = this.isCustom ? this.customWidth : this.selectedResolution.width;
             const height = this.isCustom ? this.customHeight : this.selectedResolution.height;
             const prompt = promptInput?.value.trim() || '';
             const apiKey = apiKeyInput?.value.trim() || '';
 
-            // Store API key
             this.storeApiKey(apiKey);
 
-            // Disable button during processing
             generateBtn.disabled = true;
             generateBtn.textContent = 'Analyzing...';
 
@@ -264,18 +249,16 @@ export class UI {
                 if (prompt && apiKey) {
                     dimensions = await analyzePrompt(prompt, apiKey);
                 } else {
-                    dimensions = getDefaultDimensions();
+                    dimensions = { ...DEFAULT_DIMENSIONS };
                 }
             } catch (error) {
                 console.error('Prompt analysis failed:', error);
-                dimensions = getDefaultDimensions();
-                // Brief error indication
+                dimensions = { ...DEFAULT_DIMENSIONS };
                 generateBtn.textContent = 'Analysis failed, using defaults...';
                 await new Promise(r => setTimeout(r, 1000));
             }
 
-            const seededConfig = generateSeededConfig(dimensions, width, height);
-            this.lastSeededConfig = seededConfig;
+            const seededConfig = resolveConfig(undefined, dimensions);
 
             generateBtn.disabled = false;
             generateBtn.textContent = 'Send Cue';
@@ -283,7 +266,7 @@ export class UI {
             this.hideModal();
             this.showControls();
             this.updateResolutionDisplay(width, height);
-            this.callbacks.onGenerate(width, height, seededConfig);
+            this.callbacks.onGenerate(width, height, seededConfig, dimensions);
             this.hasGeneratedOnce = true;
         });
     }

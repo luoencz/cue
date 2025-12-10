@@ -6,51 +6,27 @@ import {
     generateCircles,
     drawCircleToBuffer,
     CircleConfig,
-    getResolutionScale,
 } from './sketch/generators';
 import { detectRegions, RegionData } from './sketch/regionFiller';
 import { ShaderRenderer, TileConfig } from './sketch/shaderRenderer';
 import { MAX_TILE_SIZE, PREVIEW_MAX_RESOLUTION } from './config/constants';
-import { generateDefaultConfig } from './config/seedConfig';
-import { AppConfig } from './config/types';
+import { resolveConfig, densityToCount } from './config/seedConfig';
+import { AppConfig, PromptDimensions } from './config/types';
+import { CONFIG_TEMPLATE } from './config/config';
 import { UI } from './ui';
 import {
     calculateTileGrid,
     needsTiledRendering,
     compositeTiles,
     extractTileRegionData,
-    scaleShapesForTile,
     downloadCanvas,
     TileInfo,
 } from './sketch/tiledRenderer';
-
-interface GenerationState {
-    targetWidth: number;
-    targetHeight: number;
-    previewWidth: number;
-    previewHeight: number;
-    displayScale: number;
-    lines: LineConfig[];
-    circles: CircleConfig[];
-    noiseSeed: number;
-    activeConfig: AppConfig;
-}
+import { appState } from './state/appState';
 
 const sketch = (p: p5) => {
     let shaderRenderer: ShaderRenderer;
     let ui: UI;
-    let isGenerating = false;
-    let state: GenerationState = {
-        targetWidth: 1920,
-        targetHeight: 1080,
-        previewWidth: 1920,
-        previewHeight: 1080,
-        displayScale: 1,
-        lines: [],
-        circles: [],
-        noiseSeed: 0,
-        activeConfig: generateDefaultConfig(1920, 1080),
-    };
 
     /**
      * Calculate preview render resolution (capped for WebGL safety)
@@ -89,39 +65,6 @@ const sketch = (p: p5) => {
     }
 
     /**
-     * Scale shapes from target resolution to preview resolution
-     */
-    function scaleShapesToPreview(
-        lines: LineConfig[],
-        circles: CircleConfig[],
-        targetWidth: number,
-        targetHeight: number,
-        previewWidth: number,
-        previewHeight: number
-    ): { lines: LineConfig[]; circles: CircleConfig[] } {
-        const scaleX = previewWidth / targetWidth;
-        const scaleY = previewHeight / targetHeight;
-        // Use uniform scale (should be the same due to aspect ratio preservation)
-        const scale = scaleX;
-        
-        const scaledLines = lines.map(line => ({
-            ...line,
-            start: { x: line.start.x * scale, y: line.start.y * scale },
-            end: { x: line.end.x * scale, y: line.end.y * scale },
-            weight: line.weight * scale,
-        }));
-        
-        const scaledCircles = circles.map(circle => ({
-            ...circle,
-            center: { x: circle.center.x * scale, y: circle.center.y * scale },
-            radius: circle.radius * scale,
-            weight: circle.weight * scale,
-        }));
-        
-        return { lines: scaledLines, circles: scaledCircles };
-    }
-
-    /**
      * Apply CSS transform to canvas for display scaling
      */
     function applyDisplayScale(displayScale: number): void {
@@ -131,41 +74,47 @@ const sketch = (p: p5) => {
     }
 
     /**
-     * Generate shapes at target resolution using resolved config.
-     * Counts are already computed from density, just use sizeScale for circle radius.
+     * Generate shapes in normalized [0,1] coordinates using resolved config.
+     * Calculate counts from density at this point (density × megapixels).
+     * Shapes are resolution-independent; weight is constant absolute pixels.
+     * Circle radius is sampled from distribution for each circle.
      */
-    function generateShapes(width: number, height: number, config: AppConfig): { lines: LineConfig[]; circles: CircleConfig[] } {
-        // Get size scale for circle radius (density already handles count)
-        const { sizeScale } = getResolutionScale(width, height, config.referenceResolution);
-        
+    function generateShapes(width: number, height: number, config: AppConfig, dimensions: PromptDimensions): { lines: LineConfig[]; circles: CircleConfig[] } {
         const { lines: lineConfig, circles: circleConfig, colors: colorConfig } = config;
         
-        // Use resolved shape counts (already computed from density × megapixels)
-        const lines = generateLines(p, lineConfig.count, width, height, lineConfig, colorConfig);
-        const circles = generateCircles(p, circleConfig.count, width, height, circleConfig, colorConfig, sizeScale);
+        // Calculate shape counts from density at the point of use
+        const lineCount = densityToCount(lineConfig.density, width, height);
+        const circleCount = densityToCount(circleConfig.density, width, height);
+        
+        const lines = generateLines(p, lineCount, lineConfig, colorConfig);
+        // Pass radius template and dimensions so each circle samples radius independently
+        const circles = generateCircles(p, circleCount, circleConfig, colorConfig, CONFIG_TEMPLATE.circles.radius, dimensions);
         
         return { lines, circles };
     }
 
     /**
-     * Compute region data from shapes with seeded color parameters
+     * Compute region data from shapes with seeded color parameters.
+     * Shapes are in normalized [0,1] coordinates; denormalized to buffer dimensions for rendering.
+     * @param weightScale - Scale factor for stroke weights (1.0 for export, previewScale for preview)
      */
     function computeRegionData(
         lines: LineConfig[],
         circles: CircleConfig[],
         width: number,
         height: number,
-        config: AppConfig
+        config: AppConfig,
+        weightScale: number = 1.0
     ): RegionData {
         const buffer = p.createGraphics(width, height);
         buffer.pixelDensity(1);
         buffer.background(255);
         
         for (const line of lines) {
-            drawLineToBuffer(buffer, line);
+            drawLineToBuffer(buffer, line, width, height, weightScale);
         }
         for (const circle of circles) {
-            drawCircleToBuffer(buffer, circle);
+            drawCircleToBuffer(buffer, circle, width, height, weightScale);
         }
         
         buffer.loadPixels();
@@ -176,37 +125,37 @@ const sketch = (p: p5) => {
     }
 
     /**
-     * Render preview at capped resolution
+     * Render preview at capped resolution.
+     * Shapes are in normalized coordinates and will be denormalized to preview dimensions.
+     * Preview is an accurate scaled-down representation of the final export.
      */
     function renderPreview(): void {
-        const { previewWidth, previewHeight, targetWidth, targetHeight, lines, circles, noiseSeed, activeConfig } = state;
-        
-        // Scale shapes from target to preview resolution
-        const { lines: previewLines, circles: previewCircles } = scaleShapesToPreview(
-            lines, circles, targetWidth, targetHeight, previewWidth, previewHeight
-        );
-        
-        // Compute region data at preview resolution with seeded colors
-        const regionData = computeRegionData(previewLines, previewCircles, previewWidth, previewHeight, activeConfig);
+        const { previewWidth, previewHeight, targetWidth, lines, circles, noiseSeed, activeConfig } = appState.getState();
         
         // Calculate preview scale (ratio of preview to target resolution)
-        // This scales effect parameters so preview looks like a scaled-down final image
+        // This scales weights and effect parameters so preview looks like a scaled-down final image
         const previewScale = previewWidth / targetWidth;
+        
+        // Compute region data at preview resolution with scaled weights
+        const regionData = computeRegionData(lines, circles, previewWidth, previewHeight, activeConfig, previewScale);
         
         // Render with preview scale for accurate visual representation
         p.background(255);
-        shaderRenderer.render(regionData, activeConfig, noiseSeed, previewLines, previewCircles, previewScale);
+        shaderRenderer.render(regionData, activeConfig, noiseSeed, lines, circles, previewScale);
     }
 
     /**
-     * Generate new artwork with the given target resolution and seeded config
+     * Generate new artwork with the given target resolution and seeded config.
+     * If config is not provided, re-resolves with stored prompt dimensions.
      */
-    function generateArt(targetWidth: number, targetHeight: number, seededConfig?: AppConfig): void {
-        if (isGenerating) return;
-        isGenerating = true;
-        
-        // Use provided config or generate a new default one (density resolved based on resolution)
-        state.activeConfig = seededConfig ?? generateDefaultConfig(targetWidth, targetHeight);
+    function generateArt(targetWidth: number, targetHeight: number, seededConfig?: AppConfig, dimensions?: PromptDimensions): void {
+        if (seededConfig && dimensions) {
+            // Initial generation from UI with LLM dimensions
+            appState.setConfig(seededConfig, dimensions);
+        } else {
+            // Regeneration: re-resolve with stored dimensions for fresh random values
+            appState.setConfig(resolveConfig(undefined, appState.promptDimensions));
+        }
         
         // Calculate preview dimensions and display scale
         const { renderWidth, renderHeight, displayScale } = calculatePreviewDimensions(targetWidth, targetHeight);
@@ -216,18 +165,13 @@ const sketch = (p: p5) => {
             p.resizeCanvas(renderWidth, renderHeight);
         }
         
-        // Update state
-        state.targetWidth = targetWidth;
-        state.targetHeight = targetHeight;
-        state.previewWidth = renderWidth;
-        state.previewHeight = renderHeight;
-        state.displayScale = displayScale;
+        // Update state dimensions
+        appState.setDimensions(targetWidth, targetHeight, renderWidth, renderHeight, displayScale);
         
         // Generate new shapes at target resolution using seeded config
-        const { lines, circles } = generateShapes(targetWidth, targetHeight, state.activeConfig);
-        state.lines = lines;
-        state.circles = circles;
-        state.noiseSeed = p.random(1000);
+        const { lines, circles } = generateShapes(targetWidth, targetHeight, appState.activeConfig, appState.promptDimensions);
+        appState.setShapes(lines, circles);
+        appState.setNoiseSeed(p.random(1000));
         
         // Render preview
         renderPreview();
@@ -241,15 +185,13 @@ const sketch = (p: p5) => {
         
         // Update resolution display
         ui.updateResolutionDisplay(targetWidth, targetHeight);
-        
-        isGenerating = false;
     }
 
     /**
      * Export full resolution image using tiled rendering if needed
      */
     async function exportFullResolution(): Promise<void> {
-        const { targetWidth, targetHeight, lines, circles, noiseSeed, activeConfig } = state;
+        const { targetWidth, targetHeight, lines, circles, noiseSeed, activeConfig } = appState.getState();
         
         ui.showProgress('Preparing export...');
         
@@ -304,10 +246,6 @@ const sketch = (p: p5) => {
             
             const tileRegionData = extractTileRegionData(fullRegionData, tile, targetWidth, targetHeight);
             
-            const { lines: tileLines, circles: tileCircles } = scaleShapesForTile(
-                lines, circles, tile, targetWidth, targetHeight
-            );
-            
             const tileRenderer = new ShaderRenderer(tileP5, p);
             tileRenderer.init();
             
@@ -316,8 +254,7 @@ const sketch = (p: p5) => {
                 fullResolution: { width: targetWidth, height: targetHeight },
             };
             
-            // Scale = 1.0 for full resolution export
-            tileRenderer.render(tileRegionData, activeConfig, noiseSeed, tileLines, tileCircles, 1.0, tileConfig);
+            tileRenderer.render(tileRegionData, activeConfig, noiseSeed, lines, circles, 1.0, tileConfig);
             
             const tileCanvas = (tileP5 as unknown as { canvas: HTMLCanvasElement }).canvas;
             
@@ -350,8 +287,8 @@ const sketch = (p: p5) => {
         shaderRenderer.init();
 
         ui = new UI({
-            onGenerate: (width, height, seededConfig) => {
-                generateArt(width, height, seededConfig);
+            onGenerate: (width, height, seededConfig, dimensions) => {
+                generateArt(width, height, seededConfig, dimensions);
             },
             onExport: () => {
                 exportFullResolution();
@@ -364,27 +301,25 @@ const sketch = (p: p5) => {
     };
 
     p.draw = () => {
-        // Drawing is handled by generateArt
+
     };
 
     p.mousePressed = (event?: MouseEvent) => {
         const canvas = (p as unknown as { canvas: HTMLCanvasElement }).canvas;
-        
-        // Only regenerate if the click was directly on the canvas element
         if (
             event?.target === canvas &&
             p.mouseX >= 0 && p.mouseX <= p.width &&
             p.mouseY >= 0 && p.mouseY <= p.height
         ) {
-            generateArt(state.targetWidth, state.targetHeight);
+            generateArt(appState.targetWidth, appState.targetHeight);
         }
     };
 
     p.windowResized = () => {
-        if (state.targetWidth > 0 && state.targetHeight > 0) {
+        if (appState.targetWidth > 0 && appState.targetHeight > 0) {
             // Recalculate display scale for new window size
-            const { displayScale } = calculatePreviewDimensions(state.targetWidth, state.targetHeight);
-            state.displayScale = displayScale;
+            const { displayScale } = calculatePreviewDimensions(appState.targetWidth, appState.targetHeight);
+            appState.setDisplayScale(displayScale);
             applyDisplayScale(displayScale);
         }
     };

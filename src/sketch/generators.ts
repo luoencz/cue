@@ -1,6 +1,7 @@
 import p5 from 'p5';
 import { HSB, generateDistinctColor } from '../utility/color';
-import { ShapeConfig, ColorConfig, ReferenceResolution } from '../config/types';
+import { LineShapeConfig, CircleShapeConfig, ColorConfig, SeededValue, PromptDimensions } from '../config/types';
+import { resolveValue } from '../config/seedConfig';
 
 type Edge = 'top' | 'bottom' | 'left' | 'right';
 
@@ -24,37 +25,18 @@ export interface CircleConfig {
 }
 
 /**
- * Calculate scale factors for resolution-based shape generation.
- * Shape counts scale with sqrt(area), sizes scale with linear dimension.
+ * Get a random point on a specified edge in normalized [0,1] coordinates
  */
-export function getResolutionScale(width: number, height: number, reference: ReferenceResolution): {
-    countScale: number;  // For scaling number of shapes
-    sizeScale: number;   // For scaling shape sizes (radius, etc.)
-} {
-    const refArea = reference.width * reference.height;
-    const targetArea = width * height;
-    const refDimension = Math.min(reference.width, reference.height);
-    const targetDimension = Math.min(width, height);
-    
-    return {
-        countScale: Math.sqrt(targetArea / refArea),
-        sizeScale: targetDimension / refDimension,
-    };
-}
-
-/**
- * Get a random point on a specified edge
- */
-function getPointOnEdge(p: p5, edge: Edge, width: number, height: number): Point {
+function getPointOnEdge(p: p5, edge: Edge): Point {
     switch (edge) {
         case 'top':
-            return { x: p.random(width), y: 0 };
+            return { x: p.random(1), y: 0 };
         case 'bottom':
-            return { x: p.random(width), y: height };
+            return { x: p.random(1), y: 1 };
         case 'left':
-            return { x: 0, y: p.random(height) };
+            return { x: 0, y: p.random(1) };
         case 'right':
-            return { x: width, y: p.random(height) };
+            return { x: 1, y: p.random(1) };
     }
 }
 
@@ -67,14 +49,12 @@ function getRandomEdge(p: p5): Edge {
 }
 
 /**
- * Generate a line that stretches from one edge to another
+ * Generate a line that stretches from one edge to another.
  */
 export function generateEdgeToEdgeLine(
     p: p5, 
     index: number, 
-    width: number, 
-    height: number,
-    config: ShapeConfig,
+    config: LineShapeConfig,
     colors: ColorConfig
 ): LineConfig {
     const startEdge = getRandomEdge(p);
@@ -92,62 +72,65 @@ export function generateEdgeToEdgeLine(
     const brightness = colors.brightness + p.random(-briVariance, briVariance);
 
     return {
-        start: getPointOnEdge(p, startEdge, width, height),
-        end: getPointOnEdge(p, endEdge, width, height),
+        start: getPointOnEdge(p, startEdge),
+        end: getPointOnEdge(p, endEdge),
         color: generateDistinctColor(index, saturation, brightness),
         weight: config.weight,
     };
 }
 
 /**
- * Generate multiple edge-to-edge lines
+ * Generate multiple edge-to-edge lines.
+ * Positions are in normalized [0,1] coordinates; weight is absolute pixels.
  */
 export function generateLines(
     p: p5, 
     count: number, 
-    width: number, 
-    height: number,
-    config: ShapeConfig,
+    config: LineShapeConfig,
     colors: ColorConfig
 ): LineConfig[] {
     const lines: LineConfig[] = [];
     for (let i = 0; i < count; i++) {
-        lines.push(generateEdgeToEdgeLine(p, i, width, height, config, colors));
+        lines.push(generateEdgeToEdgeLine(p, i, config, colors));
     }
     return lines;
 }
 
 /**
- * Draw a line to a buffer using black color (for boundary detection)
+ * Draw a line to a buffer using black color (for boundary detection).
+ * Denormalizes positions from [0,1] to buffer dimensions.
+ * @param weightScale - Scale factor for weight (1.0 for export, previewScale for preview)
  */
-export function drawLineToBuffer(buffer: p5.Graphics, line: LineConfig): void {
+export function drawLineToBuffer(buffer: p5.Graphics, line: LineConfig, width: number, height: number, weightScale: number = 1.0): void {
     buffer.stroke(0);
-    buffer.strokeWeight(line.weight);
-    buffer.line(line.start.x, line.start.y, line.end.x, line.end.y);
+    buffer.strokeWeight(line.weight * weightScale);
+    buffer.line(
+        line.start.x * width, line.start.y * height,
+        line.end.x * width, line.end.y * height
+    );
 }
 
 /**
  * Generate a random circle within the canvas bounds.
- * @param sizeScale - Scale factor for radius (1.0 = reference resolution)
+ * Center is in normalized [0,1] coordinates; radius is fraction of smaller dimension; weight is absolute pixels.
+ * Radius is sampled from the distribution each time (not resolved once).
  */
 export function generateCircle(
     p: p5,
     index: number,
-    width: number,
-    height: number,
-    config: ShapeConfig,
+    config: CircleShapeConfig,
     colors: ColorConfig,
-    sizeScale: number = 1.0
+    radiusTemplate: SeededValue,
+    dimensions: PromptDimensions
 ): CircleConfig {
-    // Use resolved radius, scaled based on resolution
-    const baseRadius = config.radius ?? 400;
-    const radius = baseRadius * sizeScale;
+    const radius = resolveValue(radiusTemplate, dimensions);
 
-    // Keep center within canvas with some margin
+    // Keep center within canvas with some margin (in normalized coords)
+    // Margin is half the radius as a fraction
     const margin = radius * 0.5;
     const center: Point = {
-        x: p.random(margin, width - margin),
-        y: p.random(margin, height - margin),
+        x: p.random(margin, 1 - margin),
+        y: p.random(margin, 1 - margin),
     };
 
     // Use the resolved saturation/brightness values with small random variation
@@ -165,31 +148,38 @@ export function generateCircle(
 }
 
 /**
- * Generate multiple circles with resolution-based scaling.
- * @param sizeScale - Scale factor for radius (1.0 = reference resolution)
+ * Generate multiple circles.
+ * Centers are in normalized [0,1] coordinates; radius is fraction of smaller dimension; weight is absolute pixels.
+ * Radius is sampled from the distribution for each circle.
  */
 export function generateCircles(
     p: p5,
     count: number,
-    width: number,
-    height: number,
-    config: ShapeConfig,
+    config: CircleShapeConfig,
     colors: ColorConfig,
-    sizeScale: number = 1.0
+    radiusTemplate: SeededValue,
+    dimensions: PromptDimensions
 ): CircleConfig[] {
     const circles: CircleConfig[] = [];
     for (let i = 0; i < count; i++) {
-        circles.push(generateCircle(p, i, width, height, config, colors, sizeScale));
+        circles.push(generateCircle(p, i, config, colors, radiusTemplate, dimensions));
     }
     return circles;
 }
 
 /**
- * Draw a circle to a buffer using black color (for boundary detection)
+ * Draw a circle to a buffer using black color (for boundary detection).
+ * Denormalizes positions from [0,1] to buffer dimensions.
+ * @param weightScale - Scale factor for weight (1.0 for export, previewScale for preview)
  */
-export function drawCircleToBuffer(buffer: p5.Graphics, circle: CircleConfig): void {
+export function drawCircleToBuffer(buffer: p5.Graphics, circle: CircleConfig, width: number, height: number, weightScale: number = 1.0): void {
     buffer.noFill();
     buffer.stroke(0);
-    buffer.strokeWeight(circle.weight);
-    buffer.circle(circle.center.x, circle.center.y, circle.radius * 2);
+    buffer.strokeWeight(circle.weight * weightScale);
+    const smallerDimension = Math.min(width, height);
+    buffer.circle(
+        circle.center.x * width,
+        circle.center.y * height,
+        circle.radius * smallerDimension * 2
+    );
 }

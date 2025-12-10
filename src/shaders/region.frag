@@ -44,10 +44,6 @@ uniform float uSaturationBleed;    // Saturation variation
 uniform float uBleedScale;         // Scale of color bleeding pattern
 uniform float uEdgeIrregularity;   // Organic edge variation
 
-//=============================================================================
-// SDF PRIMITIVES
-//=============================================================================
-
 /**
  * Signed distance to a line segment from point p to segment (a, b)
  */
@@ -104,10 +100,6 @@ float computeLeadingSDF(vec2 pixelPos) {
     return minDist;
 }
 
-//=============================================================================
-// SIMPLEX NOISE (2D)
-//=============================================================================
-
 vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
 vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
 vec3 permute(vec3 x) { return mod289(((x * 34.0) + 1.0) * x); }
@@ -162,10 +154,6 @@ float fbm(vec2 p, int octaves) {
     return value;
 }
 
-//=============================================================================
-// COLOR UTILITIES
-//=============================================================================
-
 vec3 rgb2hsb(vec3 c) {
     vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
     vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
@@ -181,10 +169,6 @@ vec3 hsb2rgb(vec3 c) {
     return c.z * mix(vec3(1.0), rgb, c.y);
 }
 
-//=============================================================================
-// FILM GRAIN
-//=============================================================================
-
 /**
  * High-frequency pseudo-random noise for film grain effect
  * Returns value in range [-1, 1]
@@ -192,10 +176,6 @@ vec3 hsb2rgb(vec3 c) {
 float filmGrain(vec2 coord, float seed) {
     return fract(sin(dot(coord + seed, vec2(12.9898, 78.233))) * 43758.5453) * 2.0 - 1.0;
 }
-
-//=============================================================================
-// STAINED GLASS COLOR COMPUTATION (with watercolor effects)
-//=============================================================================
 
 /**
  * Compute glass color using analytical SDF for distance-based effects.
@@ -217,30 +197,18 @@ vec3 computeGlassColor(vec2 pixelCoord, vec2 texCoord, float sdfDistance) {
     // sdfDistance is in pixels, higher = further from leading
     float dist = sdfDistance;
 
-    // -------------------------------------------------------------------------
-    // WATERCOLOR COLOR BLEEDING - Large-scale hue/saturation variation
-    // -------------------------------------------------------------------------
     vec2 bleedCoord = pixelCoord * uBleedScale + vec2(uNoiseSeed + regionId * 37.0);
     float bleedNoise = snoise(bleedCoord);
     float bleedNoise2 = snoise(bleedCoord * 1.7 + 50.0);
 
-    // -------------------------------------------------------------------------
-    // CENTER GLOW - Light transmission effect
-    // -------------------------------------------------------------------------
     // uGlowFalloff is now in pixels (resolution-relative)
     float glowFactor = smoothstep(0.0, uGlowFalloff, dist);
     float centerBrightness = glowFactor * uCenterGlow;
 
-    // -------------------------------------------------------------------------
-    // EDGE DARKENING with irregularity - Organic watercolor borders
-    // -------------------------------------------------------------------------
     float edgeNoise = snoise(pixelCoord * 0.015 + uNoiseSeed) * uEdgeIrregularity;
     float edgeFactor = 1.0 - smoothstep(0.0, uGlowFalloff * 0.3 + edgeNoise, dist);
     float edgeDarkness = edgeFactor * uEdgeDarken;
 
-    // -------------------------------------------------------------------------
-    // GLASS TEXTURE NOISE - Fine organic imperfections
-    // -------------------------------------------------------------------------
     vec2 noiseCoord = pixelCoord * uNoiseScale * 0.005 + vec2(uNoiseSeed + regionId * 100.0);
 
     float noise = fbm(noiseCoord, 4) * 0.5 + 0.5;
@@ -249,9 +217,6 @@ vec3 computeGlassColor(vec2 pixelCoord, vec2 texCoord, float sdfDistance) {
     float textureNoise = mix(noise, fineNoise, 0.3);
     float noiseEffect = (textureNoise - 0.5) * uNoiseIntensity;
 
-    // -------------------------------------------------------------------------
-    // COMBINE EFFECTS - Watercolor stained glass look
-    // -------------------------------------------------------------------------
     vec3 hsb = rgb2hsb(baseColor);
 
     // Apply watercolor color bleeding (large-scale hue/saturation shift)
@@ -276,19 +241,12 @@ vec3 computeGlassColor(vec2 pixelCoord, vec2 texCoord, float sdfDistance) {
     return hsb2rgb(hsb);
 }
 
-//=============================================================================
-// MAIN
-//=============================================================================
-
 void main() {
     // Local pixel coordinate within this tile
     vec2 localPixelCoord = vTexCoord * uResolution;
     // Global pixel coordinate in full image (for consistent noise/patterns across tiles)
     vec2 pixelCoord = localPixelCoord + uTileOffset;
 
-    // =========================================================================
-    // 1. COMPUTE ANALYTICAL SDF (used for both leading and glass effects)
-    // =========================================================================
     // Distort position before SDF calculation for wavy lines
     vec2 wobble = vec2(
         snoise(pixelCoord * uWobbleScale + uNoiseSeed) * uWobbleAmount,
@@ -299,36 +257,26 @@ void main() {
     // Compute SDF once - reused for leading and glass effects
     float sdf = computeLeadingSDF(wobbledCoord);
 
-    // =========================================================================
-    // 2. COMPUTE GLASS COLOR (uses analytical SDF for distance effects)
-    // =========================================================================
     vec3 glassColor = computeGlassColor(pixelCoord, vTexCoord, sdf);
 
-    // =========================================================================
-    // 3. WOBBLY LEADING - Organic hand-drawn look
-    // =========================================================================
-    // Anti-aliasing width in pixels
-    float aaWidth = 1.5;
+    // Anti-aliasing using screen-space derivatives
+    // fwidth(sdf) gives the rate of change of sdf across neighboring pixels,
+    // providing resolution-independent antialiasing
+    float aa = fwidth(sdf);
 
     // Compute blend factor: 1.0 = fully leading, 0.0 = fully glass
-    float leadingBlend = 1.0 - smoothstep(uLeadingThickness - aaWidth, uLeadingThickness, sdf);
+    // Center the AA zone around the edge for proper antialiasing
+    float leadingBlend = 1.0 - smoothstep(uLeadingThickness - aa, uLeadingThickness + aa, sdf);
 
     // Compute leading color with inner shading for depth
     float innerShade = smoothstep(0.0, uLeadingThickness * 0.5, sdf) * 0.15 + 0.85;
     vec3 leadingColor = uLeadingColor * innerShade;
 
-    // =========================================================================
-    // 4. BLEND LEADING WITH GLASS
-    // =========================================================================
     vec3 finalColor = mix(glassColor, leadingColor, leadingBlend);
 
-    // =========================================================================
-    // 5. FILM GRAIN - Visible texture overlay
-    // =========================================================================
     float grain = filmGrain(pixelCoord, uNoiseSeed);
     finalColor += grain * uGrainIntensity;
 
-    // Clamp to valid range
     finalColor = clamp(finalColor, 0.0, 1.0);
 
     gl_FragColor = vec4(finalColor, 1.0);
