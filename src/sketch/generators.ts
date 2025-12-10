@@ -139,13 +139,9 @@ export function generateCircle(
     colors: ColorConfig,
     sizeScale: number = 1.0
 ): CircleConfig {
-    // Scale radius based on resolution so circles cover proportional area
-    const rMin = config.radiusMin ?? 200;
-    const rMax = config.radiusMax ?? 600;
-    
-    const scaledRadiusMin = rMin * sizeScale;
-    const scaledRadiusMax = rMax * sizeScale;
-    const radius = p.random(scaledRadiusMin, scaledRadiusMax);
+    // Use resolved radius, scaled based on resolution
+    const baseRadius = config.radius ?? 400;
+    const radius = baseRadius * sizeScale;
 
     // Keep center within canvas with some margin
     const margin = radius * 0.5;

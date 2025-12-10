@@ -38,10 +38,9 @@ export function isSeededValue(value: ConfigValue): value is SeededValue {
 }
 
 export interface ShapeConfigTemplate {
-    count: SeededValue;
+    density: SeededValue;
     weight: SeededValue;
-    radiusMin?: ConfigValue;
-    radiusMax?: ConfigValue;
+    radius?: SeededValue;
 }
 
 export interface ColorConfigTemplate {
@@ -100,8 +99,7 @@ export interface ConfigTemplate {
 export interface ShapeConfig {
     count: number;
     weight: number;
-    radiusMin?: number;
-    radiusMax?: number;
+    radius?: number;
 }
 
 export interface ColorConfig {

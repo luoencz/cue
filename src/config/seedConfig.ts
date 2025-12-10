@@ -127,31 +127,40 @@ function resolveConfigValue(value: ConfigValue, dimensions: PromptDimensions): n
 }
 
 /**
- * Generate a resolved AppConfig from the template and dimensions
+ * Convert density (shapes per megapixel) to count based on target resolution
+ */
+function densityToCount(density: number, width: number, height: number, minCount: number = 0): number {
+    const megapixels = (width * height) / 1_000_000;
+    return Math.max(minCount, Math.round(density * megapixels));
+}
+
+/**
+ * Generate a resolved AppConfig from the template, dimensions, and target resolution.
+ * Density values are converted to counts based on the target resolution.
  */
 export function resolveConfig(
-    template: ConfigTemplate = CONFIG_TEMPLATE,
-    dimensions: PromptDimensions
+    template: ConfigTemplate,
+    dimensions: PromptDimensions,
+    targetWidth: number,
+    targetHeight: number
 ): AppConfig {
+    // Resolve density values first, then convert to counts
+    const lineDensity = resolveValue(template.lines.density, dimensions);
+    const circleDensity = resolveValue(template.circles.density, dimensions);
+    
     return {
         lines: {
-            count: Math.round(resolveValue(template.lines.count, dimensions)),
+            count: densityToCount(lineDensity, targetWidth, targetHeight, 1),  // min 1 line
             weight: resolveValue(template.lines.weight, dimensions),
-            radiusMin: template.lines.radiusMin !== undefined 
-                ? resolveConfigValue(template.lines.radiusMin, dimensions) 
-                : undefined,
-            radiusMax: template.lines.radiusMax !== undefined 
-                ? resolveConfigValue(template.lines.radiusMax, dimensions) 
+            radius: template.lines.radius !== undefined 
+                ? resolveValue(template.lines.radius, dimensions) 
                 : undefined
         },
         circles: {
-            count: Math.round(resolveValue(template.circles.count, dimensions)),
+            count: densityToCount(circleDensity, targetWidth, targetHeight, 0),
             weight: resolveValue(template.circles.weight, dimensions),
-            radiusMin: template.circles.radiusMin !== undefined 
-                ? resolveConfigValue(template.circles.radiusMin, dimensions) 
-                : undefined,
-            radiusMax: template.circles.radiusMax !== undefined 
-                ? resolveConfigValue(template.circles.radiusMax, dimensions) 
+            radius: template.circles.radius !== undefined 
+                ? resolveValue(template.circles.radius, dimensions) 
                 : undefined
         },
         colors: {
@@ -189,18 +198,22 @@ export function resolveConfig(
  * Generate a config using default template and provided dimensions.
  * This is the main entry point for seeded config generation.
  */
-export function generateSeededConfig(dimensions: PromptDimensions): AppConfig {
-    return resolveConfig(CONFIG_TEMPLATE, dimensions);
+export function generateSeededConfig(
+    dimensions: PromptDimensions,
+    targetWidth: number,
+    targetHeight: number
+): AppConfig {
+    return resolveConfig(CONFIG_TEMPLATE, dimensions, targetWidth, targetHeight);
 }
 
 /**
  * Generate a config with neutral dimensions (0.5 for all).
  * Useful for non-seeded generation.
  */
-export function generateDefaultConfig(): AppConfig {
+export function generateDefaultConfig(targetWidth: number, targetHeight: number): AppConfig {
     return resolveConfig(CONFIG_TEMPLATE, {
         valence: 0.5,
         arousal: 0.5,
         focus: 0.5
-    });
+    }, targetWidth, targetHeight);
 }

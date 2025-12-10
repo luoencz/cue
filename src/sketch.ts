@@ -24,7 +24,6 @@ import {
     TileInfo,
 } from './sketch/tiledRenderer';
 
-// Generation state - preserved for regeneration and export
 interface GenerationState {
     targetWidth: number;
     targetHeight: number;
@@ -50,7 +49,7 @@ const sketch = (p: p5) => {
         lines: [],
         circles: [],
         noiseSeed: 0,
-        activeConfig: generateDefaultConfig(),
+        activeConfig: generateDefaultConfig(1920, 1080),
     };
 
     /**
@@ -133,22 +132,17 @@ const sketch = (p: p5) => {
 
     /**
      * Generate shapes at target resolution using resolved config.
-     * Shape counts are already resolved in the config, scale with area for larger images.
+     * Counts are already computed from density, just use sizeScale for circle radius.
      */
     function generateShapes(width: number, height: number, config: AppConfig): { lines: LineConfig[]; circles: CircleConfig[] } {
-        // Get resolution-based scale factors
-        const { countScale, sizeScale } = getResolutionScale(width, height, config.referenceResolution);
+        // Get size scale for circle radius (density already handles count)
+        const { sizeScale } = getResolutionScale(width, height, config.referenceResolution);
         
         const { lines: lineConfig, circles: circleConfig, colors: colorConfig } = config;
         
-        // Use resolved shape counts (already determined by beta sampling + sentiment)
-        // Scale by resolution for larger/smaller images
-        const numLines = Math.max(1, Math.round(lineConfig.count * countScale));
-        const numCircles = Math.round(circleConfig.count * countScale);
-        
-        // Generate shapes with scaled sizes
-        const lines = generateLines(p, numLines, width, height, lineConfig, colorConfig);
-        const circles = generateCircles(p, numCircles, width, height, circleConfig, colorConfig, sizeScale);
+        // Use resolved shape counts (already computed from density × megapixels)
+        const lines = generateLines(p, lineConfig.count, width, height, lineConfig, colorConfig);
+        const circles = generateCircles(p, circleConfig.count, width, height, circleConfig, colorConfig, sizeScale);
         
         return { lines, circles };
     }
@@ -211,8 +205,8 @@ const sketch = (p: p5) => {
         if (isGenerating) return;
         isGenerating = true;
         
-        // Use provided config or generate a new default one
-        state.activeConfig = seededConfig ?? generateDefaultConfig();
+        // Use provided config or generate a new default one (density resolved based on resolution)
+        state.activeConfig = seededConfig ?? generateDefaultConfig(targetWidth, targetHeight);
         
         // Calculate preview dimensions and display scale
         const { renderWidth, renderHeight, displayScale } = calculatePreviewDimensions(targetWidth, targetHeight);

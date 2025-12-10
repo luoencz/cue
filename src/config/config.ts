@@ -12,29 +12,31 @@ import { REFERENCE_RESOLUTION } from './constants';
 
 export const CONFIG_TEMPLATE: ConfigTemplate = {
     lines: {
-        count: {
-            range: [2, 8],
+        density: {
+            range: [0.2, 1],
             beta: [2, 2],
             seed: { dimension: 'arousal', influence: 0.7 }
         },
         weight: {
-            range: [6, 12],
+            range: [8, 10],
             beta: [1.5, 1.5]
         }
     },
 
     circles: {
-        count: {
-            range: [0, 4],
+        density: {
+            range: [0.05, 0.3],
             beta: [2, 2],
             seed: { dimension: 'arousal', influence: 0.6 }
         },
         weight: {
-            range: [6, 12],
+            range: [8, 10],
             beta: [1.5, 1.5]
         },
-        radiusMin: 200,
-        radiusMax: 600
+        radius: {
+            range: [200, 600],
+            beta: [1.5, 1.5]
+        }
     },
 
     colors: {
@@ -74,7 +76,7 @@ export const CONFIG_TEMPLATE: ConfigTemplate = {
         glowFalloff: 100,
         noiseScale: 2.5,
         noiseIntensity: {
-            range: [0.05, 0.3],
+            range: [0.05, 0.1],
             beta: [2, 2],
             seed: { dimension: 'focus', influence: 0.5 }
         }
@@ -93,7 +95,7 @@ export const CONFIG_TEMPLATE: ConfigTemplate = {
             seed: { dimension: 'focus', influence: 0.4 }
         },
         wobbleAmount: {
-            range: [1, 10],
+            range: [1, 3],
             beta: [2, 2],
             seed: { dimension: 'focus', influence: 0.6 }
         },

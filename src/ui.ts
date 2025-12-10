@@ -274,7 +274,7 @@ export class UI {
                 await new Promise(r => setTimeout(r, 1000));
             }
 
-            const seededConfig = generateSeededConfig(dimensions);
+            const seededConfig = generateSeededConfig(dimensions, width, height);
             this.lastSeededConfig = seededConfig;
 
             generateBtn.disabled = false;
