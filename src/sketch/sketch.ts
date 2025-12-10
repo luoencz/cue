@@ -9,9 +9,11 @@ import {
     getResolutionScale,
 } from './generators';
 import { detectRegions, RegionData } from './regionFiller';
-import { ShaderRenderer, StainedGlassConfig, TileConfig } from './shaderRenderer';
-import { LINES, CIRCLES, STAINED_GLASS, MAX_TILE_SIZE } from './config';
-import { UI } from './ui';
+import { ShaderRenderer, TileConfig } from './shaderRenderer';
+import { MAX_TILE_SIZE, PREVIEW_MAX_RESOLUTION } from '../config/constants';
+import { CONFIG } from '../config/config';
+import { AppConfig } from '../config/types';
+import { UI } from '../ui';
 import {
     calculateTileGrid,
     needsTiledRendering,
@@ -21,9 +23,6 @@ import {
     downloadCanvas,
     TileInfo,
 } from './tiledRenderer';
-
-/** Maximum preview resolution (longest side) - keeps WebGL within safe limits */
-const PREVIEW_MAX_RESOLUTION = 1920;
 
 // Generation state - preserved for regeneration and export
 interface GenerationState {
@@ -35,6 +34,7 @@ interface GenerationState {
     lines: LineConfig[];
     circles: CircleConfig[];
     noiseSeed: number;
+    activeConfig: AppConfig;
 }
 
 const sketch = (p: p5) => {
@@ -50,6 +50,7 @@ const sketch = (p: p5) => {
         lines: [],
         circles: [],
         noiseSeed: 0,
+        activeConfig: CONFIG,
     };
 
     /**
@@ -131,37 +132,40 @@ const sketch = (p: p5) => {
     }
 
     /**
-     * Generate shapes at target resolution.
+     * Generate shapes at target resolution using seeded config.
      * Shape counts scale with area (more shapes for larger images).
      * Shape sizes (circle radius) scale with linear dimension.
      * Effect parameters (line thickness, wobble) remain fixed pixels.
      */
-    function generateShapes(width: number, height: number): { lines: LineConfig[]; circles: CircleConfig[] } {
+    function generateShapes(width: number, height: number, config: AppConfig): { lines: LineConfig[]; circles: CircleConfig[] } {
         // Get resolution-based scale factors
-        const { countScale, sizeScale } = getResolutionScale(width, height);
+        const { countScale, sizeScale } = getResolutionScale(width, height, config.referenceResolution);
         
-        // Scale shape counts based on canvas area (sqrt for linear density)
-        const baseLineCount = p.random(LINES.min, LINES.max);
-        const baseCircleCount = p.random(CIRCLES.min, CIRCLES.max);
+        const { lines: lineConfig, circles: circleConfig, colors: colorConfig } = config;
+        
+        // Use seeded shape counts
+        const baseLineCount = p.random(lineConfig.min, lineConfig.max);
+        const baseCircleCount = p.random(circleConfig.min, circleConfig.max);
         
         const numLines = Math.floor(baseLineCount * countScale);
         const numCircles = Math.floor(baseCircleCount * countScale);
         
         // Generate shapes with scaled sizes
-        const lines = generateLines(p, numLines, width, height);
-        const circles = generateCircles(p, numCircles, width, height, sizeScale);
+        const lines = generateLines(p, numLines, width, height, lineConfig, colorConfig);
+        const circles = generateCircles(p, numCircles, width, height, circleConfig, colorConfig, sizeScale);
         
         return { lines, circles };
     }
 
     /**
-     * Compute region data from shapes
+     * Compute region data from shapes with seeded color parameters
      */
     function computeRegionData(
         lines: LineConfig[],
         circles: CircleConfig[],
         width: number,
-        height: number
+        height: number,
+        config: AppConfig
     ): RegionData {
         const buffer = p.createGraphics(width, height);
         buffer.pixelDensity(1);
@@ -175,7 +179,7 @@ const sketch = (p: p5) => {
         }
         
         buffer.loadPixels();
-        const regionData = detectRegions(buffer.pixels as unknown as Uint8ClampedArray, width, height);
+        const regionData = detectRegions(buffer.pixels as unknown as Uint8ClampedArray, width, height, config.colors);
         buffer.remove();
         
         return regionData;
@@ -185,21 +189,15 @@ const sketch = (p: p5) => {
      * Render preview at capped resolution
      */
     function renderPreview(): void {
-        const { previewWidth, previewHeight, targetWidth, targetHeight, lines, circles, noiseSeed } = state;
+        const { previewWidth, previewHeight, targetWidth, targetHeight, lines, circles, noiseSeed, activeConfig } = state;
         
         // Scale shapes from target to preview resolution
         const { lines: previewLines, circles: previewCircles } = scaleShapesToPreview(
             lines, circles, targetWidth, targetHeight, previewWidth, previewHeight
         );
         
-        // Compute region data at preview resolution
-        const regionData = computeRegionData(previewLines, previewCircles, previewWidth, previewHeight);
-        
-        // Build shader config
-        const config: StainedGlassConfig = {
-            ...STAINED_GLASS,
-            noiseSeed,
-        };
+        // Compute region data at preview resolution with seeded colors
+        const regionData = computeRegionData(previewLines, previewCircles, previewWidth, previewHeight, activeConfig);
         
         // Calculate preview scale (ratio of preview to target resolution)
         // This scales effect parameters so preview looks like a scaled-down final image
@@ -207,15 +205,20 @@ const sketch = (p: p5) => {
         
         // Render with preview scale for accurate visual representation
         p.background(255);
-        shaderRenderer.render(regionData, config, previewLines, previewCircles, previewScale);
+        shaderRenderer.render(regionData, activeConfig, noiseSeed, previewLines, previewCircles, previewScale);
     }
 
     /**
-     * Generate new artwork with the given target resolution
+     * Generate new artwork with the given target resolution and seeded config
      */
-    function generateArt(targetWidth: number, targetHeight: number): void {
+    function generateArt(targetWidth: number, targetHeight: number, seededConfig?: AppConfig): void {
         if (isGenerating) return;
         isGenerating = true;
+        
+        // Use provided config or keep existing
+        if (seededConfig) {
+            state.activeConfig = seededConfig;
+        }
         
         // Calculate preview dimensions and display scale
         const { renderWidth, renderHeight, displayScale } = calculatePreviewDimensions(targetWidth, targetHeight);
@@ -232,8 +235,8 @@ const sketch = (p: p5) => {
         state.previewHeight = renderHeight;
         state.displayScale = displayScale;
         
-        // Generate new shapes at target resolution
-        const { lines, circles } = generateShapes(targetWidth, targetHeight);
+        // Generate new shapes at target resolution using seeded config
+        const { lines, circles } = generateShapes(targetWidth, targetHeight, state.activeConfig);
         state.lines = lines;
         state.circles = circles;
         state.noiseSeed = p.random(1000);
@@ -258,7 +261,7 @@ const sketch = (p: p5) => {
      * Export full resolution image using tiled rendering if needed
      */
     async function exportFullResolution(): Promise<void> {
-        const { targetWidth, targetHeight, lines, circles, noiseSeed } = state;
+        const { targetWidth, targetHeight, lines, circles, noiseSeed, activeConfig } = state;
         
         ui.showProgress('Preparing export...');
         
@@ -272,15 +275,14 @@ const sketch = (p: p5) => {
             const exportP5 = p.createGraphics(targetWidth, targetHeight, p.WEBGL);
             exportP5.pixelDensity(1);
             
-            // Compute full-res region data (shapes are already at target resolution)
-            const regionData = computeRegionData(lines, circles, targetWidth, targetHeight);
+            // Compute full-res region data with seeded colors
+            const regionData = computeRegionData(lines, circles, targetWidth, targetHeight, activeConfig);
             
             const exportRenderer = new ShaderRenderer(exportP5, p);
             exportRenderer.init();
             
-            const config: StainedGlassConfig = { ...STAINED_GLASS, noiseSeed };
             // Scale = 1.0 for full resolution export
-            exportRenderer.render(regionData, config, lines, circles, 1.0);
+            exportRenderer.render(regionData, activeConfig, noiseSeed, lines, circles, 1.0);
             
             const canvas = (exportP5 as unknown as { canvas: HTMLCanvasElement }).canvas;
             downloadCanvas(canvas, `cue-${targetWidth}x${targetHeight}.png`);
@@ -298,8 +300,8 @@ const sketch = (p: p5) => {
         
         ui.updateProgress(`Computing regions...`);
         
-        // Compute full-resolution region data once
-        const fullRegionData = computeRegionData(lines, circles, targetWidth, targetHeight);
+        // Compute full-resolution region data once with seeded colors
+        const fullRegionData = computeRegionData(lines, circles, targetWidth, targetHeight, activeConfig);
         
         const renderedTiles: { canvas: HTMLCanvasElement; info: TileInfo }[] = [];
         
@@ -321,14 +323,13 @@ const sketch = (p: p5) => {
             const tileRenderer = new ShaderRenderer(tileP5, p);
             tileRenderer.init();
             
-            const config: StainedGlassConfig = { ...STAINED_GLASS, noiseSeed };
             const tileConfig: TileConfig = {
                 tileOffset: { x: tile.x, y: tile.y },
                 fullResolution: { width: targetWidth, height: targetHeight },
             };
             
             // Scale = 1.0 for full resolution export
-            tileRenderer.render(tileRegionData, config, tileLines, tileCircles, 1.0, tileConfig);
+            tileRenderer.render(tileRegionData, activeConfig, noiseSeed, tileLines, tileCircles, 1.0, tileConfig);
             
             const tileCanvas = (tileP5 as unknown as { canvas: HTMLCanvasElement }).canvas;
             
@@ -361,8 +362,8 @@ const sketch = (p: p5) => {
         shaderRenderer.init();
 
         ui = new UI({
-            onGenerate: (width, height) => {
-                generateArt(width, height);
+            onGenerate: (width, height, seededConfig) => {
+                generateArt(width, height, seededConfig);
             },
             onExport: () => {
                 exportFullResolution();

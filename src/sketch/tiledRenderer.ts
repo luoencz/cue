@@ -6,7 +6,7 @@
  */
 
 import p5 from 'p5';
-import { MAX_TILE_SIZE } from './config';
+import { MAX_TILE_SIZE } from '../config/constants';
 import { LineConfig, CircleConfig } from './generators';
 import { RegionData } from './regionFiller';
 

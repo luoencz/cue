@@ -1,12 +1,17 @@
 /**
- * UI Module - Resolution picker and controls
+ * UI Module - Resolution picker, prompt input, and controls
  */
 
-import { RESOLUTION_PRESETS, Resolution } from './config';
+import { RESOLUTION_PRESETS, Resolution } from './config/constants';
+import { analyzePrompt, PromptDimensions, getDefaultDimensions } from './llms/promptAnalyzer';
+import { generateSeededConfig } from './config/seedConfig';
+import { AppConfig } from './config/types';
 import './ui.css';
 
+const API_KEY_STORAGE_KEY = 'cue-anthropic-api-key';
+
 export interface UICallbacks {
-    onGenerate: (width: number, height: number) => void;
+    onGenerate: (width: number, height: number, seededConfig: AppConfig) => void;
     onExport: () => void;
 }
 
@@ -23,6 +28,7 @@ export class UI {
     private isCustom: boolean = false;
     private callbacks: UICallbacks;
     private hasGeneratedOnce: boolean = false;
+    private lastSeededConfig: AppConfig | null = null;
 
     constructor(callbacks: UICallbacks) {
         this.callbacks = callbacks;
@@ -38,12 +44,10 @@ export class UI {
             || (window.innerWidth <= 768);
         
         if (isMobile) {
-            // Find "Phone Portrait" preset
             const phoneIndex = RESOLUTION_PRESETS.findIndex(p => p.name === 'Phone Portrait');
             return phoneIndex >= 0 ? phoneIndex : 0;
         }
         
-        // Desktop: 4K Ultra HD (index 0)
         return 0;
     }
 
@@ -92,6 +96,25 @@ export class UI {
         }
     }
 
+    /**
+     * Get the last seeded config (for regeneration with same mood)
+     */
+    getLastSeededConfig(): AppConfig | null {
+        return this.lastSeededConfig;
+    }
+
+    private getStoredApiKey(): string {
+        return localStorage.getItem(API_KEY_STORAGE_KEY) || '';
+    }
+
+    private storeApiKey(key: string): void {
+        if (key) {
+            localStorage.setItem(API_KEY_STORAGE_KEY, key);
+        } else {
+            localStorage.removeItem(API_KEY_STORAGE_KEY);
+        }
+    }
+
     private createModal(): void {
         const overlay = document.createElement('div');
         overlay.className = 'cue-modal-overlay';
@@ -99,36 +122,63 @@ export class UI {
         const modal = document.createElement('div');
         modal.className = 'cue-modal';
 
+        const storedApiKey = this.getStoredApiKey();
+
         modal.innerHTML = `
             <h1 class="cue-title">Cue</h1>
             <p class="cue-subtitle">Generative stained glass</p>
             
-            <p class="cue-section-label">Choose resolution</p>
-            <div class="cue-presets">
-                ${RESOLUTION_PRESETS.map((preset, i) => `
-                    <button class="cue-preset ${i === this.defaultPresetIndex ? 'selected' : ''}" data-index="${i}">
-                        <p class="cue-preset-name">${preset.name}</p>
-                        <p class="cue-preset-dims">${preset.width} × ${preset.height}</p>
-                    </button>
-                `).join('')}
+            <div class="cue-prompt-section">
+                <textarea 
+                    class="cue-prompt" 
+                    id="prompt-input" 
+                    placeholder="Describe a mood, scene, or feeling..."
+                    rows="3"
+                ></textarea>
+                <p class="cue-prompt-hint">Valence → colors · Arousal → complexity · Focus → sharpness</p>
             </div>
-
-            <div class="cue-custom-toggle">
-                <div class="cue-checkbox">
-                    <svg viewBox="0 0 24 24" fill="none">
-                        <path d="M5 12l5 5L19 7" stroke-linecap="round" stroke-linejoin="round"/>
+            
+            <div class="cue-dimension-row">
+                <div class="cue-dimension-selector">
+                    <select class="cue-select" id="preset-select">
+                        ${RESOLUTION_PRESETS.map((preset, i) => `
+                            <option value="${i}" ${i === this.defaultPresetIndex ? 'selected' : ''}>
+                                ${preset.name} — ${preset.width}×${preset.height}
+                            </option>
+                        `).join('')}
+                        <option value="custom">Custom</option>
+                    </select>
+                    <svg class="cue-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 9l6 6 6-6"/>
                     </svg>
                 </div>
-                <span class="cue-custom-label">Custom dimensions</span>
+                
+                <div class="cue-custom-inputs">
+                    <input type="number" class="cue-input" id="custom-width" placeholder="W" value="1920" min="100" max="8192">
+                    <span class="cue-times">×</span>
+                    <input type="number" class="cue-input" id="custom-height" placeholder="H" value="1080" min="100" max="8192">
+                </div>
             </div>
 
-            <div class="cue-custom-inputs">
-                <input type="number" class="cue-input" id="custom-width" placeholder="Width" value="1920" min="100" max="8192">
-                <span class="cue-times">×</span>
-                <input type="number" class="cue-input" id="custom-height" placeholder="Height" value="1080" min="100" max="8192">
+            <div class="cue-api-key-section">
+                <div class="cue-api-key-row">
+                    <input 
+                        type="password" 
+                        class="cue-api-key" 
+                        id="api-key-input" 
+                        placeholder="Anthropic API key (optional)"
+                        value="${storedApiKey}"
+                    >
+                    <button class="cue-api-key-toggle" id="api-key-toggle" type="button">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                            <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                    </button>
+                </div>
             </div>
 
-            <button class="cue-generate-btn">Send Cue</button>
+            <button class="cue-generate-btn" id="generate-btn">Send Cue</button>
             
             <p class="cue-hint">Click the canvas to regenerate with new colors</p>
         `;
@@ -139,8 +189,6 @@ export class UI {
 
         this.attachModalEvents(modal);
         
-        // Close modal when clicking outside (on overlay background)
-        // Only allow closing if user has generated at least once
         overlay.addEventListener('click', (e) => {
             if (e.target === overlay && this.hasGeneratedOnce) {
                 this.hideModal();
@@ -149,45 +197,31 @@ export class UI {
     }
 
     private attachModalEvents(modal: HTMLElement): void {
-        // Preset selection
-        const presets = modal.querySelectorAll('.cue-preset');
-        presets.forEach((preset) => {
-            preset.addEventListener('click', () => {
-                presets.forEach(p => p.classList.remove('selected'));
-                preset.classList.add('selected');
-                const index = parseInt(preset.getAttribute('data-index') || '0');
-                this.selectedResolution = RESOLUTION_PRESETS[index];
-                this.isCustom = false;
-                
-                // Uncheck custom toggle
-                const checkbox = modal.querySelector('.cue-checkbox');
-                const inputs = modal.querySelector('.cue-custom-inputs');
-                checkbox?.classList.remove('checked');
-                inputs?.classList.remove('active');
-            });
-        });
-
-        // Custom toggle
-        const customToggle = modal.querySelector('.cue-custom-toggle');
-        const checkbox = modal.querySelector('.cue-checkbox');
+        const presetSelect = modal.querySelector('#preset-select') as HTMLSelectElement;
         const customInputs = modal.querySelector('.cue-custom-inputs');
+        const widthInput = modal.querySelector('#custom-width') as HTMLInputElement;
+        const heightInput = modal.querySelector('#custom-height') as HTMLInputElement;
+        const promptInput = modal.querySelector('#prompt-input') as HTMLTextAreaElement;
+        const apiKeyInput = modal.querySelector('#api-key-input') as HTMLInputElement;
+        const apiKeyToggle = modal.querySelector('#api-key-toggle') as HTMLButtonElement;
+        const generateBtn = modal.querySelector('#generate-btn') as HTMLButtonElement;
 
-        customToggle?.addEventListener('click', () => {
-            this.isCustom = !this.isCustom;
-            checkbox?.classList.toggle('checked', this.isCustom);
-            customInputs?.classList.toggle('active', this.isCustom);
-            
-            if (this.isCustom) {
-                // Deselect presets
-                const presets = modal.querySelectorAll('.cue-preset');
-                presets.forEach(p => p.classList.remove('selected'));
+        // Preset selection via dropdown
+        presetSelect?.addEventListener('change', () => {
+            const value = presetSelect.value;
+            if (value === 'custom') {
+                this.isCustom = true;
+                customInputs?.classList.add('active');
+                widthInput?.focus();
+            } else {
+                this.isCustom = false;
+                const index = parseInt(value);
+                this.selectedResolution = RESOLUTION_PRESETS[index];
+                customInputs?.classList.remove('active');
             }
         });
 
         // Custom input changes
-        const widthInput = modal.querySelector('#custom-width') as HTMLInputElement;
-        const heightInput = modal.querySelector('#custom-height') as HTMLInputElement;
-
         widthInput?.addEventListener('change', () => {
             this.customWidth = Math.max(100, Math.min(8192, parseInt(widthInput.value) || 1920));
             widthInput.value = String(this.customWidth);
@@ -198,16 +232,58 @@ export class UI {
             heightInput.value = String(this.customHeight);
         });
 
+        // API key visibility toggle
+        apiKeyToggle?.addEventListener('click', () => {
+            const isPassword = apiKeyInput.type === 'password';
+            apiKeyInput.type = isPassword ? 'text' : 'password';
+            apiKeyToggle.classList.toggle('visible', isPassword);
+        });
+
+        // Store API key on blur
+        apiKeyInput?.addEventListener('blur', () => {
+            this.storeApiKey(apiKeyInput.value.trim());
+        });
+
         // Generate button
-        const generateBtn = modal.querySelector('.cue-generate-btn');
-        generateBtn?.addEventListener('click', () => {
+        generateBtn?.addEventListener('click', async () => {
             const width = this.isCustom ? this.customWidth : this.selectedResolution.width;
             const height = this.isCustom ? this.customHeight : this.selectedResolution.height;
+            const prompt = promptInput?.value.trim() || '';
+            const apiKey = apiKeyInput?.value.trim() || '';
+
+            // Store API key
+            this.storeApiKey(apiKey);
+
+            // Disable button during processing
+            generateBtn.disabled = true;
+            generateBtn.textContent = 'Analyzing...';
+
+            let dimensions: PromptDimensions;
+
+            try {
+                if (prompt && apiKey) {
+                    dimensions = await analyzePrompt(prompt, apiKey);
+                } else {
+                    dimensions = getDefaultDimensions();
+                }
+            } catch (error) {
+                console.error('Prompt analysis failed:', error);
+                dimensions = getDefaultDimensions();
+                // Brief error indication
+                generateBtn.textContent = 'Analysis failed, using defaults...';
+                await new Promise(r => setTimeout(r, 1000));
+            }
+
+            const seededConfig = generateSeededConfig(dimensions);
+            this.lastSeededConfig = seededConfig;
+
+            generateBtn.disabled = false;
+            generateBtn.textContent = 'Send Cue';
             
             this.hideModal();
             this.showControls();
             this.updateResolutionDisplay(width, height);
-            this.callbacks.onGenerate(width, height);
+            this.callbacks.onGenerate(width, height, seededConfig);
             this.hasGeneratedOnce = true;
         });
     }
@@ -237,13 +313,11 @@ export class UI {
         document.body.appendChild(controls);
         this.controlsBar = controls;
 
-        // Settings button - reopen modal
         const settingsBtn = controls.querySelector('#btn-settings');
         settingsBtn?.addEventListener('click', () => {
             this.showModal();
         });
 
-        // Download button
         const downloadBtn = controls.querySelector('#btn-download');
         downloadBtn?.addEventListener('click', () => {
             this.callbacks.onExport();
@@ -285,4 +359,3 @@ export class UI {
         progress?.classList.remove('visible');
     }
 }
-

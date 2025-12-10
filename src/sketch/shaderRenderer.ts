@@ -1,28 +1,14 @@
 import p5 from 'p5';
-import { HSB, hsbObjToRgb } from './color';
-import { LEADING, WATERCOLOR, STAINED_GLASS } from './config';
+import { HSB, hsbObjToRgb } from '../utility/color';
+import { AppConfig } from '../config/types';
+import { MAX_SHADER_LINES, MAX_SHADER_CIRCLES } from '../config/constants';
 import { LineConfig, CircleConfig } from './generators';
 
-// Import shaders as raw strings (Vite handles this with ?raw)
+// Import shaders as raw strings
 // @ts-ignore
 import vertShader from './shaders/region.vert' with { type: 'text' };
 // @ts-ignore
 import fragShader from './shaders/region.frag' with { type: 'text' };
-
-// Maximum shapes supported by uniform arrays (GLSL limit)
-const MAX_LINES = 40;
-const MAX_CIRCLES = 10;
-
-/**
- * Stained glass effect configuration
- */
-export interface StainedGlassConfig {
-    centerGlow: number;
-    edgeDarken: number;
-    noiseScale: number;
-    noiseIntensity: number;
-    noiseSeed: number;
-}
 
 /**
  * Tile rendering configuration for high-res export
@@ -43,7 +29,7 @@ export interface RegionData {
  */
 function packLinesForShader(lines: LineConfig[]): number[] {
     const data: number[] = [];
-    const count = Math.min(lines.length, MAX_LINES);
+    const count = Math.min(lines.length, MAX_SHADER_LINES);
 
     for (let i = 0; i < count; i++) {
         const line = lines[i];
@@ -51,7 +37,7 @@ function packLinesForShader(lines: LineConfig[]): number[] {
     }
 
     // Pad to MAX_LINES vec4s (4 floats each)
-    while (data.length < MAX_LINES * 4) {
+    while (data.length < MAX_SHADER_LINES * 4) {
         data.push(0, 0, 0, 0);
     }
 
@@ -64,15 +50,15 @@ function packLinesForShader(lines: LineConfig[]): number[] {
  */
 function packCirclesForShader(circles: CircleConfig[]): number[] {
     const data: number[] = [];
-    const count = Math.min(circles.length, MAX_CIRCLES);
+    const count = Math.min(circles.length, MAX_SHADER_CIRCLES);
 
     for (let i = 0; i < count; i++) {
         const circle = circles[i];
         data.push(circle.center.x, circle.center.y, circle.radius);
     }
 
-    // Pad to MAX_CIRCLES vec3s (3 floats each)
-    while (data.length < MAX_CIRCLES * 3) {
+    // Pad to MAX_SHADER_CIRCLES vec3s (3 floats each)
+    while (data.length < MAX_SHADER_CIRCLES * 3) {
         data.push(0, 0, 0);
     }
 
@@ -119,7 +105,8 @@ export class ShaderRenderer {
      */
     render(
         data: RegionData,
-        config: StainedGlassConfig,
+        config: AppConfig,
+        noiseSeed: number,
         lines: LineConfig[],
         circles: CircleConfig[] = [],
         previewScale: number = 1.0,
@@ -160,38 +147,38 @@ export class ShaderRenderer {
         }
 
         // Stained glass uniforms (scaled for preview)
-        this.shader.setUniform('uCenterGlow', config.centerGlow);
-        this.shader.setUniform('uEdgeDarken', config.edgeDarken);
-        this.shader.setUniform('uGlowFalloff', STAINED_GLASS.glowFalloff * previewScale);
+        this.shader.setUniform('uCenterGlow', config.stainedGlass.centerGlow);
+        this.shader.setUniform('uEdgeDarken', config.stainedGlass.edgeDarken);
+        this.shader.setUniform('uGlowFalloff', config.stainedGlass.glowFalloff * previewScale);
 
         // Noise uniforms (scale inversely for consistent visual density)
-        this.shader.setUniform('uNoiseScale', config.noiseScale);
-        this.shader.setUniform('uNoiseIntensity', config.noiseIntensity);
-        this.shader.setUniform('uNoiseSeed', config.noiseSeed);
+        this.shader.setUniform('uNoiseScale', config.stainedGlass.noiseScale);
+        this.shader.setUniform('uNoiseIntensity', config.stainedGlass.noiseIntensity);
+        this.shader.setUniform('uNoiseSeed', noiseSeed);
 
         // Line uniforms for analytical SDF
         const lineData = packLinesForShader(lines);
         this.shader.setUniform('uLines', lineData);
-        this.shader.setUniform('uLineCount', Math.min(lines.length, MAX_LINES));
+        this.shader.setUniform('uLineCount', Math.min(lines.length, MAX_SHADER_LINES));
 
         // Circle uniforms for analytical SDF
         const circleData = packCirclesForShader(circles);
         this.shader.setUniform('uCircles', circleData);
-        this.shader.setUniform('uCircleCount', Math.min(circles.length, MAX_CIRCLES));
+        this.shader.setUniform('uCircleCount', Math.min(circles.length, MAX_SHADER_CIRCLES));
 
         // Leading appearance (scaled for preview to match final appearance)
-        this.shader.setUniform('uLeadingThickness', LEADING.thickness * previewScale);
-        this.shader.setUniform('uRoundingRadius', LEADING.roundingRadius * previewScale);
-        this.shader.setUniform('uLeadingColor', [LEADING.color.r, LEADING.color.g, LEADING.color.b]);
+        this.shader.setUniform('uLeadingThickness', config.leading.thickness * previewScale);
+        this.shader.setUniform('uRoundingRadius', config.leading.roundingRadius * previewScale);
+        this.shader.setUniform('uLeadingColor', [config.leading.color.r, config.leading.color.g, config.leading.color.b]);
 
-        // Watercolor effect uniforms (scaled for preview)
-        this.shader.setUniform('uGrainIntensity', WATERCOLOR.grainIntensity);
-        this.shader.setUniform('uWobbleAmount', WATERCOLOR.wobbleAmount * previewScale);
-        this.shader.setUniform('uWobbleScale', WATERCOLOR.wobbleScale / previewScale);  // Inverse scale for pattern size
-        this.shader.setUniform('uColorBleed', WATERCOLOR.colorBleed);
-        this.shader.setUniform('uSaturationBleed', WATERCOLOR.saturationBleed);
-        this.shader.setUniform('uBleedScale', WATERCOLOR.bleedScale / previewScale);  // Inverse scale for pattern size
-        this.shader.setUniform('uEdgeIrregularity', WATERCOLOR.edgeIrregularity);
+        // Watercolor effect uniforms (scaled for preview, use seeded values when provided)
+        this.shader.setUniform('uGrainIntensity', config.watercolor.grainIntensity);
+        this.shader.setUniform('uWobbleAmount', config.watercolor.wobbleAmount * previewScale);
+        this.shader.setUniform('uWobbleScale', config.watercolor.wobbleScale / previewScale);
+        this.shader.setUniform('uColorBleed', config.watercolor.colorBleed);
+        this.shader.setUniform('uSaturationBleed', config.watercolor.saturationBleed);
+        this.shader.setUniform('uBleedScale', config.watercolor.bleedScale / previewScale);
+        this.shader.setUniform('uEdgeIrregularity', config.watercolor.edgeIrregularity);
 
         // Draw full-screen quad to trigger fragment shader
         this.renderer.rect(0, 0, width, height);

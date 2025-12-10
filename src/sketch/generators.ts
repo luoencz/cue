@@ -1,6 +1,6 @@
 import p5 from 'p5';
-import { HSB, generateDistinctColor, hsbObjToRgb } from './color';
-import { LINES, CIRCLES, COLORS, REFERENCE_RESOLUTION } from './config';
+import { HSB, generateDistinctColor } from '../utility/color';
+import { ShapeConfig, ColorConfig, ReferenceResolution } from '../config/types';
 
 type Edge = 'top' | 'bottom' | 'left' | 'right';
 
@@ -27,13 +27,13 @@ export interface CircleConfig {
  * Calculate scale factors for resolution-based shape generation.
  * Shape counts scale with sqrt(area), sizes scale with linear dimension.
  */
-export function getResolutionScale(width: number, height: number): {
+export function getResolutionScale(width: number, height: number, reference: ReferenceResolution): {
     countScale: number;  // For scaling number of shapes
     sizeScale: number;   // For scaling shape sizes (radius, etc.)
 } {
-    const refArea = REFERENCE_RESOLUTION.width * REFERENCE_RESOLUTION.height;
+    const refArea = reference.width * reference.height;
     const targetArea = width * height;
-    const refDimension = Math.min(REFERENCE_RESOLUTION.width, REFERENCE_RESOLUTION.height);
+    const refDimension = Math.min(reference.width, reference.height);
     const targetDimension = Math.min(width, height);
     
     return {
@@ -41,10 +41,6 @@ export function getResolutionScale(width: number, height: number): {
         sizeScale: targetDimension / refDimension,
     };
 }
-
-//=============================================================================
-// LINE GENERATION
-//=============================================================================
 
 /**
  * Get a random point on a specified edge
@@ -73,7 +69,14 @@ function getRandomEdge(p: p5): Edge {
 /**
  * Generate a line that stretches from one edge to another
  */
-export function generateEdgeToEdgeLine(p: p5, index: number, width: number, height: number): LineConfig {
+export function generateEdgeToEdgeLine(
+    p: p5, 
+    index: number, 
+    width: number, 
+    height: number,
+    config: ShapeConfig,
+    colors: ColorConfig
+): LineConfig {
     const startEdge = getRandomEdge(p);
     let endEdge = getRandomEdge(p);
 
@@ -82,24 +85,31 @@ export function generateEdgeToEdgeLine(p: p5, index: number, width: number, heig
         endEdge = getRandomEdge(p);
     }
 
-    const saturation = COLORS.saturationMin + p.random(COLORS.saturationMax - COLORS.saturationMin);
-    const brightness = COLORS.brightnessMin + p.random(COLORS.brightnessMax - COLORS.brightnessMin);
+    const saturation = colors.saturationMin + p.random(colors.saturationMax - colors.saturationMin);
+    const brightness = colors.brightnessMin + p.random(colors.brightnessMax - colors.brightnessMin);
 
     return {
         start: getPointOnEdge(p, startEdge, width, height),
         end: getPointOnEdge(p, endEdge, width, height),
         color: generateDistinctColor(index, saturation, brightness),
-        weight: p.random(LINES.weightMin, LINES.weightMax),
+        weight: p.random(config.weightMin, config.weightMax),
     };
 }
 
 /**
  * Generate multiple edge-to-edge lines
  */
-export function generateLines(p: p5, count: number, width: number, height: number): LineConfig[] {
+export function generateLines(
+    p: p5, 
+    count: number, 
+    width: number, 
+    height: number,
+    config: ShapeConfig,
+    colors: ColorConfig
+): LineConfig[] {
     const lines: LineConfig[] = [];
     for (let i = 0; i < count; i++) {
-        lines.push(generateEdgeToEdgeLine(p, i, width, height));
+        lines.push(generateEdgeToEdgeLine(p, i, width, height, config, colors));
     }
     return lines;
 }
@@ -113,10 +123,6 @@ export function drawLineToBuffer(buffer: p5.Graphics, line: LineConfig): void {
     buffer.line(line.start.x, line.start.y, line.end.x, line.end.y);
 }
 
-//=============================================================================
-// CIRCLE GENERATION
-//=============================================================================
-
 /**
  * Generate a random circle within the canvas bounds.
  * @param sizeScale - Scale factor for radius (1.0 = reference resolution)
@@ -126,11 +132,17 @@ export function generateCircle(
     index: number,
     width: number,
     height: number,
+    config: ShapeConfig,
+    colors: ColorConfig,
     sizeScale: number = 1.0
 ): CircleConfig {
     // Scale radius based on resolution so circles cover proportional area
-    const scaledRadiusMin = CIRCLES.radiusMin * sizeScale;
-    const scaledRadiusMax = CIRCLES.radiusMax * sizeScale;
+    // Use defaults if radiusMin/Max are missing
+    const rMin = config.radiusMin ?? 200;
+    const rMax = config.radiusMax ?? 600;
+    
+    const scaledRadiusMin = rMin * sizeScale;
+    const scaledRadiusMax = rMax * sizeScale;
     const radius = p.random(scaledRadiusMin, scaledRadiusMax);
 
     // Keep center within canvas with some margin
@@ -140,14 +152,14 @@ export function generateCircle(
         y: p.random(margin, height - margin),
     };
 
-    const saturation = COLORS.saturationMin + p.random(COLORS.saturationMax - COLORS.saturationMin);
-    const brightness = COLORS.brightnessMin + p.random(COLORS.brightnessMax - COLORS.brightnessMin);
+    const saturation = colors.saturationMin + p.random(colors.saturationMax - colors.saturationMin);
+    const brightness = colors.brightnessMin + p.random(colors.brightnessMax - colors.brightnessMin);
 
     return {
         center,
         radius,
         color: generateDistinctColor(index + 100, saturation, brightness),  // Offset index for different hues
-        weight: p.random(CIRCLES.weightMin, CIRCLES.weightMax),
+        weight: p.random(config.weightMin, config.weightMax),
     };
 }
 
@@ -160,11 +172,13 @@ export function generateCircles(
     count: number,
     width: number,
     height: number,
+    config: ShapeConfig,
+    colors: ColorConfig,
     sizeScale: number = 1.0
 ): CircleConfig[] {
     const circles: CircleConfig[] = [];
     for (let i = 0; i < count; i++) {
-        circles.push(generateCircle(p, i, width, height, sizeScale));
+        circles.push(generateCircle(p, i, width, height, config, colors, sizeScale));
     }
     return circles;
 }

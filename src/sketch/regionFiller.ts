@@ -1,9 +1,7 @@
-import { extractBoundaries } from './sdf';
-import { HSB, generateDistinctColor } from './color';
-import { COLORS } from './config';
-
-const LINE_THRESHOLD = 50; // Pixels darker than this are considered lines
-const BOUNDARY_ID = 255;   // Reserved ID for boundary pixels
+import { extractBoundaries } from '../utility/sdf';
+import { HSB } from '../utility/color';
+import { ColorConfig } from '../config/types';
+import { LINE_THRESHOLD, BOUNDARY_ID } from '../config/constants';
 
 /**
  * Result of region detection - ready for shader rendering.
@@ -27,11 +25,14 @@ interface Span {
  * Detect regions from a line buffer using flood fill.
  * Returns region IDs and colors ready for GPU shader rendering.
  * Distance effects are computed analytically in the shader using SDF.
+ * 
+ * @param config - Color parameters from AppConfig
  */
 export function detectRegions(
     linePixels: Uint8ClampedArray,
     width: number,
-    height: number
+    height: number,
+    config: ColorConfig
 ): RegionData {
     const totalPixels = width * height;
 
@@ -69,10 +70,16 @@ export function detectRegions(
                 break outer;
             }
 
-            // Assign color for this region using config values
-            const saturation = COLORS.saturationMin + Math.random() * (COLORS.saturationMax - COLORS.saturationMin);
-            const brightness = COLORS.brightnessMin + Math.random() * (COLORS.brightnessMax - COLORS.brightnessMin);
-            colors.push(generateDistinctColor(regionId, saturation, brightness));
+            // Assign color for this region using seeded parameters
+            const saturation = config.saturationMin + Math.random() * (config.saturationMax - config.saturationMin);
+            const brightness = config.brightnessMin + Math.random() * (config.brightnessMax - config.brightnessMin);
+            
+            // Use seeded hue base with golden ratio distribution within the hue range
+            const goldenRatio = 0.618033988749895;
+            const hueOffset = (regionId * goldenRatio) % 1;
+            const hue = (config.hueBase + (hueOffset - 0.5) * config.hueRange + 1) % 1;
+            
+            colors.push({ h: hue, s: saturation, b: brightness });
 
             // Flood fill this region with the current ID
             fillRegion(ids, visited, width, height, x, y, regionId);

@@ -37,8 +37,8 @@
     background: var(--cue-surface);
     border: 1px solid var(--cue-border);
     border-radius: 16px;
-    padding: 48px;
-    max-width: 560px;
+    padding: 36px 40px;
+    max-width: 480px;
     width: 90%;
     max-height: 90vh;
     overflow-y: auto;
@@ -62,136 +62,131 @@
 
 .cue-subtitle {
     font-family: 'DM Mono', monospace;
-    font-size: 13px;
+    font-size: 12px;
     color: var(--cue-text-dim);
-    margin: 0 0 40px 0;
+    margin: 0 0 24px 0;
     text-transform: uppercase;
     letter-spacing: 0.1em;
 }
 
-.cue-section-label {
+/* Prompt Section */
+.cue-prompt-section {
+    margin-bottom: 20px;
+}
+
+.cue-prompt {
     font-family: 'DM Mono', monospace;
-    font-size: 11px;
-    color: var(--cue-text-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.15em;
-    margin: 0 0 16px 0;
-}
-
-/* Presets Grid */
-.cue-presets {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
-    margin-bottom: 32px;
-}
-
-.cue-preset {
-    background: transparent;
+    font-size: 13px;
+    background: var(--cue-bg);
     border: 1px solid var(--cue-border);
-    border-radius: 10px;
-    padding: 16px;
-    cursor: pointer;
-    text-align: left;
-    transition: all 0.2s ease;
+    border-radius: 8px;
+    padding: 12px 14px;
+    color: var(--cue-text);
+    width: 100%;
+    resize: none;
+    transition: border-color 0.2s ease;
+    line-height: 1.5;
 }
 
-.cue-preset:hover {
-    background: var(--cue-surface-hover);
+.cue-prompt:focus {
+    outline: none;
+    border-color: var(--cue-accent);
+}
+
+.cue-prompt::placeholder {
+    color: var(--cue-text-dim);
+}
+
+.cue-prompt-hint {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--cue-text-dim);
+    margin: 8px 0 0 0;
+    opacity: 0.7;
+}
+
+/* Dimension Row - Compact Layout */
+.cue-dimension-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.cue-dimension-selector {
+    position: relative;
+    flex: 1;
+}
+
+.cue-select {
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    background: var(--cue-bg);
+    border: 1px solid var(--cue-border);
+    border-radius: 8px;
+    padding: 12px 36px 12px 14px;
+    color: var(--cue-text);
+    width: 100%;
+    cursor: pointer;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    transition: border-color 0.2s ease;
+}
+
+.cue-select:hover {
     border-color: var(--cue-text-dim);
 }
 
-.cue-preset.selected {
-    background: var(--cue-accent-glow);
+.cue-select:focus {
+    outline: none;
     border-color: var(--cue-accent);
 }
 
-.cue-preset-name {
-    font-family: 'DM Mono', monospace;
-    font-size: 14px;
-    font-weight: 500;
+.cue-select option {
+    background: var(--cue-surface);
     color: var(--cue-text);
-    margin: 0 0 4px 0;
+    padding: 8px;
 }
 
-.cue-preset-dims {
-    font-family: 'DM Mono', monospace;
-    font-size: 12px;
+.cue-select-chevron {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 16px;
+    height: 16px;
     color: var(--cue-text-dim);
-    margin: 0;
-}
-
-/* Custom Dimensions Toggle */
-.cue-custom-toggle {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 16px;
-    cursor: pointer;
-}
-
-.cue-checkbox {
-    width: 20px;
-    height: 20px;
-    border: 1px solid var(--cue-border);
-    border-radius: 4px;
-    background: transparent;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s ease;
-}
-
-.cue-checkbox.checked {
-    background: var(--cue-accent);
-    border-color: var(--cue-accent);
-}
-
-.cue-checkbox svg {
-    width: 12px;
-    height: 12px;
-    stroke: var(--cue-bg);
-    stroke-width: 3;
-    opacity: 0;
-    transition: opacity 0.15s ease;
-}
-
-.cue-checkbox.checked svg {
-    opacity: 1;
-}
-
-.cue-custom-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 13px;
-    color: var(--cue-text);
-}
-
-/* Custom Inputs */
-.cue-custom-inputs {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    gap: 12px;
-    align-items: center;
-    margin-bottom: 32px;
-    opacity: 0.4;
     pointer-events: none;
-    transition: opacity 0.2s ease;
+}
+
+/* Custom Inputs - Inline */
+.cue-custom-inputs {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    opacity: 0;
+    width: 0;
+    overflow: hidden;
+    pointer-events: none;
+    transition: all 0.25s ease;
 }
 
 .cue-custom-inputs.active {
     opacity: 1;
+    width: auto;
     pointer-events: auto;
 }
 
 .cue-input {
     font-family: 'DM Mono', monospace;
-    font-size: 16px;
+    font-size: 13px;
     background: var(--cue-bg);
     border: 1px solid var(--cue-border);
     border-radius: 8px;
-    padding: 14px 16px;
+    padding: 12px 10px;
     color: var(--cue-text);
-    width: 100%;
+    width: 70px;
     text-align: center;
     transition: border-color 0.2s ease;
 }
@@ -201,27 +196,99 @@
     border-color: var(--cue-accent);
 }
 
+/* Hide number input spinners */
+.cue-input::-webkit-outer-spin-button,
+.cue-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.cue-input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
 .cue-input::placeholder {
     color: var(--cue-text-dim);
 }
 
 .cue-times {
     font-family: 'DM Mono', monospace;
-    font-size: 18px;
+    font-size: 14px;
     color: var(--cue-text-dim);
+}
+
+/* API Key Section */
+.cue-api-key-section {
+    margin-bottom: 20px;
+}
+
+.cue-api-key-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.cue-api-key {
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    background: var(--cue-bg);
+    border: 1px solid var(--cue-border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: var(--cue-text);
+    flex: 1;
+    transition: border-color 0.2s ease;
+}
+
+.cue-api-key:focus {
+    outline: none;
+    border-color: var(--cue-accent);
+}
+
+.cue-api-key::placeholder {
+    color: var(--cue-text-dim);
+}
+
+.cue-api-key-toggle {
+    background: transparent;
+    border: 1px solid var(--cue-border);
+    border-radius: 8px;
+    padding: 9px;
+    cursor: pointer;
+    color: var(--cue-text-dim);
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.cue-api-key-toggle:hover {
+    background: var(--cue-surface-hover);
+    color: var(--cue-text);
+}
+
+.cue-api-key-toggle.visible {
+    color: var(--cue-accent);
+    border-color: var(--cue-accent);
+}
+
+.cue-api-key-toggle svg {
+    width: 16px;
+    height: 16px;
 }
 
 /* Generate Button */
 .cue-generate-btn {
     width: 100%;
     font-family: 'Instrument Serif', Georgia, serif;
-    font-size: 20px;
+    font-size: 18px;
     font-style: italic;
     background: var(--cue-accent);
     color: var(--cue-bg);
     border: none;
     border-radius: 10px;
-    padding: 18px 32px;
+    padding: 14px 28px;
     cursor: pointer;
     transition: all 0.2s ease;
     letter-spacing: 0.02em;
@@ -234,6 +301,12 @@
 
 .cue-generate-btn:active {
     transform: translateY(0);
+}
+
+.cue-generate-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    transform: none;
 }
 
 /* Controls Bar */
@@ -297,10 +370,10 @@
 /* Hint Text */
 .cue-hint {
     font-family: 'DM Mono', monospace;
-    font-size: 11px;
+    font-size: 10px;
     color: var(--cue-text-dim);
     text-align: center;
-    margin-top: 24px;
+    margin-top: 16px;
 }
 
 /* Progress Indicator */
