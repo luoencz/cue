@@ -4,8 +4,10 @@ import { LEADING, WATERCOLOR, STAINED_GLASS } from './config';
 import { LineConfig, CircleConfig } from './generators';
 
 // Import shaders as raw strings (Vite handles this with ?raw)
-import vertShader from './shaders/region.vert?raw';
-import fragShader from './shaders/region.frag?raw';
+// @ts-ignore
+import vertShader from './shaders/region.vert' with { type: 'text' };
+// @ts-ignore
+import fragShader from './shaders/region.frag' with { type: 'text' };
 
 // Maximum shapes supported by uniform arrays (GLSL limit)
 const MAX_LINES = 40;
