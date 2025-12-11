@@ -5,10 +5,10 @@ import { MAX_SHADER_LINES, MAX_SHADER_CIRCLES } from '../config/constants';
 import { LineConfig, CircleConfig } from './generators';
 
 // Import shaders as raw strings
-// @ts-ignore
-import vertShader from '../shaders/region.vert' with { type: 'text' }
-// @ts-ignore
-import fragShader from '../shaders/region.frag' with { type: 'text' }
+import vertShader from '../shaders/region.vert' with { type: 'text' };
+console.log('vertShader', vertShader);
+import fragShader from '../shaders/region.frag' with { type: 'text' };
+console.log('fragShader', fragShader);
 
 /**
  * Tile rendering configuration for high-res export
@@ -103,6 +103,10 @@ export class ShaderRenderer {
      */
     init(): void {
         this.shader = this.renderer.createShader(vertShader, fragShader);
+        if (!this.shader) {
+            console.error('Failed to create shader!');
+        }
+        console.log('shader', this.shader);
     }
 
     /**

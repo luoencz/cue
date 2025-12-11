@@ -259,10 +259,9 @@ void main() {
 
     vec3 glassColor = computeGlassColor(pixelCoord, vTexCoord, sdf);
 
-    // Anti-aliasing using screen-space derivatives
-    // fwidth(sdf) gives the rate of change of sdf across neighboring pixels,
-    // providing resolution-independent antialiasing
-    float aa = fwidth(sdf);
+    // Anti-aliasing width in pixels
+    // Since SDF is in pixel units, the rate of change is ~1.0 pixel per screen pixel
+    float aa = 1.0;
 
     // Compute blend factor: 1.0 = fully leading, 0.0 = fully glass
     // Center the AA zone around the edge for proper antialiasing
